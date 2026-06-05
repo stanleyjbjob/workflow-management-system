@@ -82,6 +82,12 @@ enum ExclusionSource {
   INTERNAL
 }
 
+enum AuthEventType {
+  LOGIN_SUCCESS
+  LOGIN_FAILURE
+  LOGOUT
+}
+
 model User {
   id             String   @id @default(cuid())
   email          String   @unique
@@ -102,6 +108,7 @@ model User {
   uploadedAttachments Attachment[]         @relation("AttachmentUploadedBy")
   submittedForms      FormSubmission[]     @relation("SubmissionSubmittedBy")
   approvedForms       FormSubmission[]     @relation("SubmissionApprovedBy")
+  loginAudits         LoginAudit[]
 
   @@index([entraOid])
 }
@@ -397,4 +404,23 @@ model Exclusion {
   project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
 
   @@index([projectId])
+}
+
+model LoginAudit {
+  id        String        @id @default(cuid())
+  userId    String?
+  email     String?
+  entraOid  String?
+  eventType AuthEventType
+  success   Boolean
+  reason    String?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime      @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([createdAt])
+  @@index([eventType])
 }
