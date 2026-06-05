@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react';
+import { WorkflowDesigner } from './features/workflow-designer';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
 
+type Tab = 'status' | 'designer';
+
 export function App(): JSX.Element {
+  const [tab, setTab] = useState<Tab>('designer');
   const [apiStatus, setApiStatus] = useState<string>('檢查中…');
 
   useEffect(() => {
@@ -12,13 +16,39 @@ export function App(): JSX.Element {
       .catch(() => setApiStatus('無法連線'));
   }, []);
 
+  const tabBtn = (key: Tab, label: string): JSX.Element => (
+    <button
+      onClick={() => setTab(key)}
+      style={{
+        padding: '0.4rem 0.9rem',
+        border: 'none',
+        borderBottom: tab === key ? '2px solid #2563eb' : '2px solid transparent',
+        background: 'none',
+        color: tab === key ? '#2563eb' : '#475569',
+        cursor: 'pointer',
+        fontSize: '0.95rem',
+        fontWeight: tab === key ? 600 : 400,
+      }}
+    >
+      {label}
+    </button>
+  );
+
   return (
-    <main style={{ fontFamily: 'system-ui, sans-serif', maxWidth: 640, margin: '4rem auto', padding: '0 1rem' }}>
-      <h1>工作流程管理系統</h1>
-      <p>前端空殼已啟動。後續功能依 issue 逐步開發。</p>
-      <p>
-        API 健康狀態：<strong>{apiStatus}</strong>
-      </p>
+    <main style={{ fontFamily: 'system-ui, sans-serif', maxWidth: 1040, margin: '2rem auto', padding: '0 1rem' }}>
+      <h1 style={{ marginBottom: '0.25rem' }}>工作流程管理系統</h1>
+      <nav style={{ borderBottom: '1px solid #e2e8f0', marginBottom: '1rem' }}>
+        {tabBtn('designer', '流程定義設計器')}
+        {tabBtn('status', '系統狀態')}
+      </nav>
+
+      {tab === 'designer' && <WorkflowDesigner />}
+      {tab === 'status' && (
+        <section>
+          <p>API 健康狀態：<strong>{apiStatus}</strong></p>
+          <p style={{ color: '#64748b' }}>後續功能依 issue 逐步開發。</p>
+        </section>
+      )}
     </main>
   );
 }
