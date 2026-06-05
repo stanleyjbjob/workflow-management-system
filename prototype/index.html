@@ -338,7 +338,7 @@
           <div class="sec-title">流程時間軸（甘特圖）</div>
           <div class="g-head"><div></div><div class="g-months" id="projMonths"></div></div>
           <div class="gantt" id="gantt"></div>
-          <div class="legend"><span>🟦 計畫區間　▰ 已完成比例　🔴 今日基準線　▨ 排除日（客戶要求）</span></div>
+          <div class="legend"><span>🟦 計畫區間　▰ 已完成比例　🔴 今日基準線　▨ 排除日（客戶要求）</span><span>↗ 點流程名稱可跳至該案件詳情</span></div>
         </div>
         <div class="detail-grid" style="margin-top:16px">
           <div class="card pad"><div class="sec-title" style="font-size:14px">各流程進度狀態</div><ul class="meta-list" id="projStatus"></ul></div>
@@ -668,16 +668,16 @@ const PROJECTS={
   p1:{name:'晴光集團 人事系統導入案',client:'晴光集團',owner:'Amy',start:'2026-05-18',end:'2026-07-25',
     flows:[
       {name:'銷售流程',start:'2026-05-18',end:'2026-05-29',progress:100},
-      {name:'系統導入流程',start:'2026-05-25',end:'2026-06-20',progress:28},
+      {name:'系統導入流程',start:'2026-05-25',end:'2026-06-20',progress:28,caseId:'c2'},
       {name:'環境建置流程',start:'2026-06-02',end:'2026-06-30',progress:42},
-      {name:'客製化流程（考核公式）',start:'2026-06-12',end:'2026-07-25',progress:0},
+      {name:'客製化流程（考核公式）',start:'2026-06-12',end:'2026-07-25',progress:0,caseId:'c4'},
     ],
     exclude:[{from:'2026-06-19',to:'2026-06-21',reason:'客戶端盤點，暫停作業'}]},
   p2:{name:'大新企業 入口網站（訂閱）',client:'大新企業',owner:'Leo',start:'2026-05-25',end:'2026-07-03',
     flows:[
       {name:'銷售流程',start:'2026-05-25',end:'2026-06-02',progress:100},
       {name:'系統導入流程',start:'2026-05-28',end:'2026-06-22',progress:20},
-      {name:'環境建置流程（租戶）',start:'2026-06-03',end:'2026-07-03',progress:35},
+      {name:'環境建置流程（租戶）',start:'2026-06-03',end:'2026-07-03',progress:35,caseId:'c3'},
     ],
     exclude:[]},
 };
@@ -702,13 +702,14 @@ function renderProject(){const p=PROJECTS[curProj];const min=dnum(p.start),max=d
   const bands=(p.exclude||[]).map(x=>{const l=(dnum(x.from)-min)/span*100,w=(Math.max(dnum(x.to),dnum(x.from))-dnum(x.from)+1)/span*100;return `<div class="g-exclude" style="left:${l}%;width:${w}%" title="${x.reason}"></div>`;}).join('');
   const todayHtml=(TNUM>=min&&TNUM<=max)?`<div class="g-today" style="left:${(TNUM-min)/span*100}%"><span class="dot"></span></div>`:'';
   $('#gantt').innerHTML=p.flows.map(f=>{const left=(dnum(f.start)-min)/span*100,w=(dnum(f.end)-dnum(f.start))/span*100;const st=flowStatus(f);
-    return `<div class="g-row"><div class="g-label"><span>${f.name}</span><span class="muted" style="font-size:11px">${f.start} ~ ${f.end} · <span class="pill ${st.c}" style="padding:1px 7px">${st.k}${st.delta!==undefined&&st.k!=='準時'?(st.delta>0?' +':' ')+st.delta+'%':''}</span></span></div><div class="g-track">${bands}${todayHtml}<div class="g-bar" style="left:${left}%;width:${w}%"><div class="fill" style="width:${f.progress}%"></div><span class="pct">${f.progress}%</span></div></div></div>`;}).join('');
+    return `<div class="g-row"><div class="g-label"${f.caseId?` style="cursor:pointer" title="點擊查看案件詳情" onclick="gotoCase('${f.caseId}')"`:''}><span>${f.name}${f.caseId?' <span style="color:var(--brand)">↗</span>':''}</span><span class="muted" style="font-size:11px">${f.start} ~ ${f.end} · <span class="pill ${st.c}" style="padding:1px 7px">${st.k}${st.delta!==undefined&&st.k!=='準時'?(st.delta>0?' +':' ')+st.delta+'%':''}</span></span></div><div class="g-track">${bands}${todayHtml}<div class="g-bar" style="left:${left}%;width:${w}%"><div class="fill" style="width:${f.progress}%"></div><span class="pct">${f.progress}%</span></div></div></div>`;}).join('');
   // status list
   $('#projStatus').innerHTML=p.flows.map(f=>{const st=flowStatus(f);return `<li><span>${f.name}</span><span class="pill ${st.c}">${st.k}${st.delta!==undefined&&st.k!=='準時'?(st.delta>0?' +':' ')+st.delta+'%':''}</span></li>`;}).join('');
   // calendar
   $('#projCal').innerHTML=(p.exclude||[]).length?p.exclude.map((x,i)=>`<li><span>${x.from} ~ ${x.to}<div class="muted" style="font-size:11px">${x.reason}</div></span><button class="btn sm" onclick="delExclude(${i})">移除</button></li>`).join(''):'<div class="muted" style="font-size:12px">尚無排除日，新增後甘特圖會以斜線標示並避開排程。</div>';
 }
 function gotoProject(id){if(!PROJECTS[id])return;curProj=id;buildProjectSel();renderProject();go('project');toast('已切換至專案：'+PROJECTS[id].name);}
+function gotoCase(id){if(!CASES[id])return;openCase(id);go('case');toast('已開啟案件：'+CASES[id].title);}
 function openEx(){$('#exBg').classList.add('show');}
 function closeEx(){$('#exBg').classList.remove('show');}
 function saveEx(){const f=$('#exFrom').value.trim()||'2026-06-19',to=$('#exTo').value.trim()||f,r=$('#exReason').value.trim()||'客戶要求排除';(PROJECTS[curProj].exclude=PROJECTS[curProj].exclude||[]).push({from:f,to:to,reason:r});$('#exFrom').value='';$('#exTo').value='';$('#exReason').value='';closeEx();renderProject();toast('已新增排除日');}
