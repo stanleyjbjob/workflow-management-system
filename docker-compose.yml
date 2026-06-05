@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: wfms
+      POSTGRES_PASSWORD: wfms
+      POSTGRES_DB: wfms
+    ports:
+      - "5432:5432"
+    volumes:
+      - db_data:/var/lib/postgresql/data
+
+  api:
+    build: ./apps/api
+    environment:
+      API_PORT: 3000
+      DATABASE_URL: postgresql://wfms:wfms@db:5432/wfms?schema=public
+    ports:
+      - "3000:3000"
+    depends_on:
+      - db
+
+  web:
+    build: ./apps/web
+    ports:
+      - "8080:80"
+    depends_on:
+      - api
+
+volumes:
+  db_data:
