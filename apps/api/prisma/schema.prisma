@@ -1,0 +1,400 @@
+// 工作流程管理系統 — 核心資料模型（Prisma schema）
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum RoleCode {
+  MANAGER
+  SALES
+  CONSULTANT
+  ENG_LEAD
+  ENGINEER
+  ASSISTANT
+}
+
+enum FlowType {
+  SALES
+  ONBOARDING
+  ENVIRONMENT
+  CUSTOMIZATION
+}
+
+enum SaleMode {
+  PURCHASE
+  SUBSCRIPTION
+}
+
+enum CaseStatus {
+  DRAFT
+  IN_PROGRESS
+  ON_HOLD
+  COMPLETED
+  CANCELLED
+  FAILED
+}
+
+enum StepInstanceStatus {
+  PENDING
+  IN_PROGRESS
+  COMPLETED
+  SKIPPED
+  RETURNED
+}
+
+enum FieldType {
+  TEXT
+  TEXTAREA
+  NUMBER
+  DATE
+  SELECT
+  MULTISELECT
+  CHECKBOX
+  FILE
+  SIGNATURE
+}
+
+enum SubmissionStatus {
+  DRAFT
+  SUBMITTED
+  APPROVED
+  REJECTED
+}
+
+enum AttachmentType {
+  FILE
+  LINK
+}
+
+enum ProjectStatus {
+  ACTIVE
+  COMPLETED
+  ON_HOLD
+  CANCELLED
+}
+
+enum ExclusionSource {
+  CUSTOMER
+  INTERNAL
+}
+
+model User {
+  id             String   @id @default(cuid())
+  email          String   @unique
+  displayName    String
+  entraOid       String?  @unique
+  isActive       Boolean  @default(true)
+  isLocalAccount Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  roles               UserRole[]
+  ownedProjects       Project[]            @relation("ProjectOwner")
+  createdProjects     Project[]            @relation("ProjectCreatedBy")
+  assignedCases       Case[]               @relation("CaseAssignee")
+  createdCases        Case[]               @relation("CaseCreatedBy")
+  assignedStepInsts   StepInstance[]       @relation("StepAssignee")
+  createdWorkflows    WorkflowDefinition[]
+  uploadedAttachments Attachment[]         @relation("AttachmentUploadedBy")
+  submittedForms      FormSubmission[]     @relation("SubmissionSubmittedBy")
+  approvedForms       FormSubmission[]     @relation("SubmissionApprovedBy")
+
+  @@index([entraOid])
+}
+
+model Role {
+  id           String   @id @default(cuid())
+  code         RoleCode @unique
+  name         String
+  description  String?
+  entraGroupId String?
+  createdAt    DateTime @default(now())
+
+  users            UserRole[]
+  responsibleSteps StepDefinition[] @relation("StepResponsibleRole")
+}
+
+model UserRole {
+  userId     String
+  roleId     String
+  assignedAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role Role @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@id([userId, roleId])
+  @@index([roleId])
+}
+
+model WorkflowDefinition {
+  id          String   @id @default(cuid())
+  flowType    FlowType
+  name        String
+  description String?
+  version     Int      @default(1)
+  isActive    Boolean  @default(true)
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  createdBy User?            @relation(fields: [createdById], references: [id])
+  steps     StepDefinition[]
+  cases     Case[]
+
+  @@unique([flowType, name, version])
+  @@index([flowType])
+}
+
+model StepDefinition {
+  id                String   @id @default(cuid())
+  workflowId        String
+  order             Int
+  name              String
+  description       String?
+  responsibleRoleId String?
+  nextStepId        String?  @unique
+  isOptional        Boolean  @default(false)
+  createdAt         DateTime @default(now())
+
+  workflow        WorkflowDefinition @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  responsibleRole Role?              @relation("StepResponsibleRole", fields: [responsibleRoleId], references: [id])
+  nextStep        StepDefinition?    @relation("StepOrder", fields: [nextStepId], references: [id])
+  prevStep        StepDefinition?    @relation("StepOrder")
+
+  forms         StepForm[]
+  templates     StepTemplate[]
+  stepInstances StepInstance[]
+
+  @@unique([workflowId, order])
+  @@index([workflowId])
+  @@index([responsibleRoleId])
+}
+
+model StepTemplate {
+  id        String   @id @default(cuid())
+  stepId    String
+  name      String
+  fileUrl   String?
+  linkUrl   String?
+  fileType  String?
+  version   Int      @default(1)
+  createdAt DateTime @default(now())
+
+  step StepDefinition @relation(fields: [stepId], references: [id], onDelete: Cascade)
+
+  @@index([stepId])
+}
+
+model FormDefinition {
+  id          String   @id @default(cuid())
+  code        String
+  name        String
+  description String?
+  version     Int      @default(1)
+  isSignable  Boolean  @default(false)
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  fields      FormField[]
+  steps       StepForm[]
+  submissions FormSubmission[]
+
+  @@unique([code, version])
+}
+
+model FormField {
+  id        String    @id @default(cuid())
+  formId    String
+  order     Int
+  key       String
+  label     String
+  fieldType FieldType
+  required  Boolean   @default(false)
+  options   Json?
+
+  form FormDefinition @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@unique([formId, key])
+  @@unique([formId, order])
+  @@index([formId])
+}
+
+model StepForm {
+  stepId     String
+  formId     String
+  isRequired Boolean @default(true)
+
+  step StepDefinition @relation(fields: [stepId], references: [id], onDelete: Cascade)
+  form FormDefinition @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@id([stepId, formId])
+  @@index([formId])
+}
+
+model Case {
+  id                    String     @id @default(cuid())
+  code                  String     @unique
+  workflowId            String
+  flowType              FlowType
+  title                 String
+  clientName            String?
+  saleMode              SaleMode?
+  status                CaseStatus @default(DRAFT)
+  currentStepInstanceId String?    @unique
+  failureReason         String?
+  assigneeId            String?
+  createdById           String?
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+
+  workflow      WorkflowDefinition @relation(fields: [workflowId], references: [id])
+  assignee      User?              @relation("CaseAssignee", fields: [assigneeId], references: [id])
+  createdBy     User?              @relation("CaseCreatedBy", fields: [createdById], references: [id])
+  currentStep   StepInstance?      @relation("CaseCurrentStep", fields: [currentStepInstanceId], references: [id])
+  stepInstances StepInstance[]     @relation("CaseStepInstances")
+  submissions   FormSubmission[]
+  attachments   Attachment[]
+  projectFlows  ProjectFlow[]
+
+  @@index([workflowId])
+  @@index([status])
+  @@index([flowType])
+}
+
+model StepInstance {
+  id               String             @id @default(cuid())
+  caseId           String
+  stepDefinitionId String
+  order            Int
+  status           StepInstanceStatus @default(PENDING)
+  assigneeId       String?
+  dueDate          DateTime?
+  startedAt        DateTime?
+  completedAt      DateTime?
+  note             String?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  case           Case           @relation("CaseStepInstances", fields: [caseId], references: [id], onDelete: Cascade)
+  stepDefinition StepDefinition @relation(fields: [stepDefinitionId], references: [id])
+  assignee       User?          @relation("StepAssignee", fields: [assigneeId], references: [id])
+  currentOfCase  Case?          @relation("CaseCurrentStep")
+
+  submissions FormSubmission[]
+  attachments Attachment[]
+
+  @@index([caseId])
+  @@index([stepDefinitionId])
+  @@index([assigneeId])
+}
+
+model FormSubmission {
+  id               String           @id @default(cuid())
+  formDefinitionId String
+  caseId           String
+  stepInstanceId   String?
+  status           SubmissionStatus @default(DRAFT)
+  data             Json
+  submittedById    String?
+  submittedAt      DateTime?
+  approvedById     String?
+  approvedAt       DateTime?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  form         FormDefinition @relation(fields: [formDefinitionId], references: [id])
+  case         Case           @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  stepInstance StepInstance?  @relation(fields: [stepInstanceId], references: [id])
+  submittedBy  User?          @relation("SubmissionSubmittedBy", fields: [submittedById], references: [id])
+  approvedBy   User?          @relation("SubmissionApprovedBy", fields: [approvedById], references: [id])
+  attachments  Attachment[]
+
+  @@index([formDefinitionId])
+  @@index([caseId])
+  @@index([stepInstanceId])
+}
+
+model Attachment {
+  id               String         @id @default(cuid())
+  type             AttachmentType
+  name             String
+  fileUrl          String?
+  linkUrl          String?
+  mimeType         String?
+  sizeBytes        Int?
+  version          Int            @default(1)
+  uploadedById     String?
+  caseId           String?
+  stepInstanceId   String?
+  formSubmissionId String?
+  createdAt        DateTime       @default(now())
+
+  uploadedBy     User?           @relation("AttachmentUploadedBy", fields: [uploadedById], references: [id])
+  case           Case?           @relation(fields: [caseId], references: [id], onDelete: Cascade)
+  stepInstance   StepInstance?   @relation(fields: [stepInstanceId], references: [id], onDelete: Cascade)
+  formSubmission FormSubmission? @relation(fields: [formSubmissionId], references: [id], onDelete: Cascade)
+
+  @@index([caseId])
+  @@index([stepInstanceId])
+  @@index([formSubmissionId])
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  code        String        @unique
+  name        String
+  client      String
+  ownerId     String
+  planStart   DateTime
+  planEnd     DateTime
+  status      ProjectStatus @default(ACTIVE)
+  createdById String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  owner      User          @relation("ProjectOwner", fields: [ownerId], references: [id])
+  createdBy  User?         @relation("ProjectCreatedBy", fields: [createdById], references: [id])
+  flows      ProjectFlow[]
+  exclusions Exclusion[]
+
+  @@index([ownerId])
+  @@index([status])
+}
+
+model ProjectFlow {
+  id        String   @id @default(cuid())
+  projectId String
+  caseId    String?
+  flowType  FlowType
+  name      String
+  planStart DateTime
+  planEnd   DateTime
+  progress  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  case    Case?   @relation(fields: [caseId], references: [id])
+
+  @@index([projectId])
+  @@index([caseId])
+}
+
+model Exclusion {
+  id        String           @id @default(cuid())
+  projectId String
+  fromDate  DateTime
+  toDate    DateTime
+  reason    String
+  source    ExclusionSource?
+  createdAt DateTime         @default(now())
+
+  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([projectId])
+}
