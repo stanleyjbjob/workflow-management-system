@@ -28,10 +28,11 @@ import {
  * - 「即將到期」視窗以工作日衡量（注入 calendar-engine businessDaysBetween）。
  * - 「受連假 / 假日遞延」標示：到期日落在非工作日→遞延，天數＝到下一工作日的曆日差（沿用 4.1）。
  *
+ * 假日來源（§12-5）：自 7.1 起改由 `CalendarService.loadCalendar()` 讀 `Holiday` 資料表驅動，
+ * 故主管於 Holiday 表維護的國定假日 / 連假 / 補班會同步反映在看板的到期 / 遞延標示。
+ *
  * 不在此處理（屬後續任務 / 已知相依）：
  * - 「待填表單」數（pendingRequiredForms）：引擎已預留欄位，待接上 FormsModule 統計後填入（本輪預設 0）。
- * - 公司自訂假日 / 連假 / 補班來源（§12-5）：目前以 calendar-engine 內建固定日 + 週末計，
- *   待定案後於 getBoard 的 holiday 參數帶入即生效。
  */
 @Injectable()
 export class KanbanService {
@@ -45,7 +46,7 @@ export class KanbanService {
    * 取得某使用者（依角色可見範圍）的任務看板。
    * @param user 目前登入者（SessionUser）。
    * @param filter 檢視層過濾（角色 / 承辦人 / 流程型別 / 僅與我相關）。
-   * @param options now（評估基準）/ upcomingWithinDays（即將到期視窗，工作日）/ holiday（自訂假日行事曆）。
+   * @param options now（評估基準）/ upcomingWithinDays（即將到期視窗，工作日）/ holiday（自訂假日行事曆，與 DB 假日合併）。
    */
   async getBoard(
     user: SessionUser,
@@ -92,8 +93,8 @@ export class KanbanService {
       isManager: this.accessScope.isManager(user),
     };
 
-    // 以同一份行事曆同時驅動「工作日視窗」與「遞延標示」。
-    const cal = this.calendar.buildCalendar(options?.holiday ?? {});
+    // 以同一份「DB 假日驅動」的行事曆同時驅動「工作日視窗」與「遞延標示」。
+    const cal = await this.calendar.loadCalendar(options?.holiday ?? {});
 
     return buildBoard(tasks, {
       viewer,
