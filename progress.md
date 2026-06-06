@@ -28,7 +28,8 @@
 | 3.2 | #18 系統導入流程 | ✅ done | apps/api `onboarding/` 純引擎 + OnboardingService、26 項 jest 單元測試；handoffToEngineering 建立 ENVIRONMENT 案件。REST/UI 屬後續 |
 | 3.3 | #19 環境建置流程 | ✅ done | apps/api `environment/` 純引擎(依銷售模式分支買斷/訂閱、接收導入移交、主機採購等待狀態、表單齊備+環境驗收把關、接收藍圖序列化)、55 項測試(sandbox 全綠 + tsc --strict 通過)；EnvironmentService(receiveFromOnboarding/recordHostProcurement+等待狀態 ON_HOLD/getHostReadiness/submitEnvironmentForm/getFormStatuses/completeEnvironment→COMPLETED)；app.module 註冊 EnvironmentModule。REST/UI 屬後續 |
 | 3.4 | #20 客製化（需求變更）流程 | ✅ done | apps/api `customization/` 純引擎(指派鏈把關/狀態機/複測退回循環/測試區→正式區兩道關卡/需求變更單序列化)、40 項測試(sandbox 全綠 + tsc --strict 通過)；CustomizationService(raiseChangeRequest/assignEngLead/assignEngineer/submitForm/submitForRetest/recordRetest/confirmTestDeploy/confirmProdDeploy + append-only 狀態事件持久化)；app.module 註冊 CustomizationModule。REST/UI 屬後續 |
-| 4.x~6.x | #21-#30 | 待辦 | 依 WBS 順序 |
+| 4.1 | #21 行事曆判斷：假日/連假遞延 | ✅ done | apps/api `calendar/` 純引擎(假日/週末/補班判斷、遞延、工作日運算、兩種遞延模式重算)+CalendarService(專案排除日 §10.5)、45 項斷言全綠 + tsc --strict 通過(引擎/spec/service) |
+| 4.2~6.x | #22-#30 | 待辦 | 依 WBS 順序 |
 
 ## 3.3 交付物（#19，環境建置流程，§6）
 - `apps/api/src/environment/`：後端「環境建置流程」模組（對應需求規格 §6）。
@@ -59,6 +60,21 @@
   - `customization.module.ts` / `index.ts`：`CustomizationModule`（imports PrismaModule）。
 - `apps/api/src/app.module.ts`：註冊 `CustomizationModule`。
 
+## 4.1 交付物（#21，行事曆判斷：假日/連假遞延，§8.3）
+- `apps/api/src/calendar/`：行事曆遞延模組（對應需求規格 §8.3，整合 §10.5 專案排除日）。
+  - `calendar-engine.ts`：**純邏輯**（無 DB/Nest 相依，日界一律 UTC，與 2.x/3.x 同風格）。
+    - 日期工具：`toIsoDate`/`parseIsoDate`(拒絕格式錯誤與溢位日如 2026-02-30)/`addDays`/`calendarDaysBetween`/`weekdayOf`。
+    - 行事曆：`HolidayCalendarInput`→`buildCalendar`(假日/補班/可自訂週末；補班與假日衝突時**假日優先**)、`mergeCalendars`。
+    - 工作日判斷：`isWeekend`/`isHoliday`/`isMakeupWorkday`/`isWorkday`(補班→工作日；假日/週末→非工作日)/`isNonWorkday`。
+    - 注入點：`buildExcludedPredicate(cal, extraExcluded?)`→`isExcluded(date)=>boolean`，可直接餵給 onboarding `buildSchedule`(該函式早已預留此參數，曆法來源待 4.1)。
+    - 遞延/工作日運算：`deferToWorkday`(連假整段順延，全為假日拋 `calendar_no_workday` 守門 366 天)/`nextWorkday`/`previousWorkday`/`addBusinessDays`(含負數)/`businessDaysBetween`。
+    - 時程重算：`reschedule(anchor, checkpoints, cal, mode, extraExcluded?)`→`RescheduledCheckpoint[]`(原始日/計畫日/遞延天數，依計畫日排序)。**兩種模式**：`DeferralMode.NEXT_WORKDAY`(順延下一工作日，各點獨立)、`DeferralMode.PUSH_FORWARD`(整體後推，位移以工作日計)；預設 NEXT_WORKDAY。
+    - 範例假日：`SAMPLE_TW_FIXED_HOLIDAYS_2026`(僅西曆固定日，農曆連假/補班需由來源校正)。
+  - `calendar-engine.spec.ts`：jest 單元測試（涵蓋日期工具/行事曆/工作日/predicate/遞延/重算兩模式/merge/sample）。**沙箱以 node --experimental-transform-types 跑 45 項斷言全綠、tsc --strict 通過**。
+  - `calendar.service.ts`：`CalendarService`(Prisma)：buildCalendar(合併範例+自訂)/getProjectExclusionPredicate(讀 Exclusion 區間→predicate)/buildIsExcluded(假日+專案排除日合成)/deferToWorkday/nextWorkday/reschedule。
+  - `calendar.module.ts` / `index.ts`：`CalendarModule`(imports PrismaModule)。
+- `apps/api/src/app.module.ts`：註冊 `CalendarModule`。
+
 ## 技術決策（供 review）
 - **決策**：沿用 2.x/3.1/3.2「純引擎 + Service」風格，引擎不依賴 DB 可被純函式測試。**理由**：一致、可測。
 - **決策（3.3）**：environment-engine 與 onboarding 解耦（以結構型別 `EnvironmentHandoffLike` 接收移交藍圖）；服務層才呼叫 `OnboardingService.getEngineeringHandoff` 串接。**理由**：避免跨流程模組強耦合（與 3.2 對 sales 一致）。
@@ -70,6 +86,11 @@
 - **決策（3.4）**：流程狀態機（CustomizationState）與 schema `CaseStatus` 解耦——前者描述「流程進到哪一步」（8 態，含退回），後者反映案件生命週期（IN_PROGRESS/COMPLETED）供 5.x 甘特圖。**理由**：§7 步驟細緻且含循環，硬塞進 CaseStatus 會失真。
 - **決策（3.4）**：指派鏈角色（顧問/工程主管/工程師）以引擎 `planAssign*` 比對被指派人角色但**不強制**（roleMatches 僅回報，null＝未提供）。**理由**：§12-1 跨角色移交是否需核可未定，先回報不阻擋；服務層以 RBAC/Case.assigneeId 落地。
 - **決策（3.4）**：服務層操作既有 CUSTOMIZATION 案件（caseId 由呼叫端提供），不在此建立 Case/WorkflowDefinition。**理由**：與 3.3 一致；流程定義由 8.x/設計器產生。
+- **決策（4.1）**：曆法引擎日界一律以 UTC 判斷（toIsoDate/parseIsoDate 用 getUTC*）。**理由**：避免執行環境時區造成跨日誤差，測試亦可穩定重現。
+- **決策（4.1）**：§12-5 遞延規則（順延下一工作日 / 整體後推）未定案，故**兩種模式皆實作**並以 `DeferralMode` 選用、預設 NEXT_WORKDAY，而非臆測單一規則。**理由**：沿用既有「保留介面/可設定、不硬編業務規則」風格(如 3.3 簽核、3.4 roleMatches)；待主管確認後切換即可，不需改引擎。
+- **決策（4.1）**：本輪**不新增 Holiday 資料表/migration**；假日來源以「範例固定日 + 呼叫端自訂(公司/政府行事曆)」組成，專案排除日讀既有 Exclusion 表。**理由**：沿用既有「不新增 migration」策略(避免 CI 需 generated client)；持久化假日來源待人類確認來源形式(§12-5)後再補。
+- **決策（4.1）**：補班日(makeupWorkdays)與假日衝突時假日優先；補班日視為工作日以支援台灣『週六補班』情境。**理由**：符合『政府宣布放假』直覺，補班為例外的強制上班。
+
 
 ## 未完成 / Handoff（下一輪或人類接手）
 1. ✅（3.1）拜訪/會議紀錄 + 成案移交藍圖持久化落地（getHandoff 可取回）。
@@ -77,7 +98,7 @@
 3. ✅（3.3）環境建置流程引擎 + 服務落地：依銷售模式分支、接收導入移交、主機採購等待狀態、環境驗收把關→COMPLETED。
 4. **CI 全流程驗證**：3.3 引擎 + spec 已於 sandbox 驗證（55 測試綠 + tsc --strict）；`environment.service.ts` 以 stub（PrismaService/OnboardingService/@nestjs/common）通過 strict typecheck，惟未在真實 monorepo 跑 `pnpm -r build`（需 generated Prisma client）。下輪/人類 review 時請確認 CI build 綠。
 5. ✅（3.4）客製化（需求變更）流程引擎 + 服務落地：需求變更單→指派鏈→開發/測試文件→複測（不通過退回循環）→測試區→正式區兩道關卡→COMPLETED。下一個可動工：4.1 行事曆遞延（#21）/ 4.2 提醒（#22）。
-6. **提醒派送（4.2）/ 曆法遞延（4.1）**：onboarding `dueReminders` 已算出需提醒清單、`buildSchedule` 已留 `isExcluded` 介面；環境建置時程提醒亦可沿用。實際通知管道（§12-7）與國定假日來源（§12-5）待 4.x。
+6. ✅（4.1）曆法遞延引擎 + CalendarService 已落地：可產生 `isExcluded` predicate 注入 onboarding/environment `buildSchedule`、支援兩種遞延模式重算、整合專案排除日(§10.5)。**下一輪整合**：將 onboarding/environment service 實際呼叫 `CalendarService.buildIsExcluded()` 注入 buildSchedule(目前仍為預設 identity，未串接)。**仍待**：提醒派送管道(4.2 #22 / §12-7)；持久化假日來源(Holiday 表 / 政府行事曆匯入，§12-5)；遞延模式政策定案(目前預設 NEXT_WORKDAY)。
 7. **REST controller / 前端 UI**：sales / onboarding / environment / customization 皆尚未提供（屬後續 API 層任務）。
 8. **服務層整合測試**：sales/onboarding/environment/customization service 目前僅引擎層純函式測試覆蓋；DB 行為待後續以整合測試補強。
 
@@ -86,6 +107,6 @@
 - §12-2 失敗原因分類項目（供改善分析報表）→ 影響 3.1 失敗分類 Enum 收斂，目前以可擴充字串承載。
 - §12-3 各表單實際欄位（報價單/客製需求/委任權限表/人員資料表/環境建置檢核表等）→ 目前僅以 code 標識容器、data 承載 JSON。
 - §12-4 各表單簽核關卡與層級 → 影響環境驗收/客製化複測是否需簽核（3.3/3.4 目前未強制，保留簽核集合介面）。
-- §12-5 行事曆遞延規則（順延下一工作日/整體後推）→ onboarding `buildSchedule` 已留 `isExcluded`，曆法來源待 4.1。
+- §12-5 行事曆遞延規則（順延下一工作日/整體後推）→ **4.1 已實作兩種模式(DeferralMode)並預設 NEXT_WORKDAY，待主管定案選用**；假日持久化來源(Holiday 表/政府行事曆)亦待確認。
 - §12-7 提醒管道（系統內/Email/其他）→ 影響 4.2 與 onboarding `dueReminders` 派送。
 - §12-10 附件/範本實體儲存於系統或改以 SharePoint/OneDrive 連結為主、允許檔案類型與大小上限 → 影響 2.4/2.5 上傳實作，待主管確認。
