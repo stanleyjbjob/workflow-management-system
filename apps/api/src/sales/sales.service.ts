@@ -114,7 +114,7 @@ export class SalesService {
         formDefinitionId: form.id,
         caseId,
         status: SubmissionStatus.SUBMITTED,
-        data: serializeSalesRecord(record) as object,
+        data: serializeSalesRecord(record) as never,
         submittedById: submittedById ?? null,
         submittedAt: record.occurredAt,
       },
