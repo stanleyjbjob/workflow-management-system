@@ -88,6 +88,16 @@ enum AuthEventType {
   LOGOUT
 }
 
+enum HolidayType {
+  HOLIDAY
+  MAKEUP_WORKDAY
+}
+
+enum HolidaySource {
+  GOVERNMENT
+  COMPANY
+}
+
 model User {
   id             String   @id @default(cuid())
   email          String   @unique
@@ -423,4 +433,21 @@ model LoginAudit {
   @@index([userId])
   @@index([createdAt])
   @@index([eventType])
+}
+
+/// 假日 / 補班行事曆（主管維護；對應需求規格 §8.3 行事曆整合、§12-5）。
+/// type=HOLIDAY 視為放假、MAKEUP_WORKDAY 視為補班上班；同日衝突時 calendar-engine 以假日優先。
+/// date 使用 @db.Date（純日期，無時間），與 calendar-engine 以 UTC 日界判斷一致。
+model Holiday {
+  id        String        @id @default(cuid())
+  date      DateTime      @db.Date
+  name      String
+  type      HolidayType   @default(HOLIDAY)
+  source    HolidaySource @default(GOVERNMENT)
+  note      String?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@unique([date])
+  @@index([type])
 }
