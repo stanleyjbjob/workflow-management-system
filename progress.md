@@ -34,7 +34,24 @@
 | 5.2 | #24 甘特圖與進度呈現 | ✅ done | apps/api `projects/gantt-engine.ts` 純引擎(時間軸範圍/月份刻度/各流程長條+完成填色 fillRatio/今日基準線+inRange/§4.2 預期進度/§4.3 狀態 delta+容許門檻 T/排除日網底/KPI 整體進度·延遲·超前·排除日區間數)、**27 案測試**(sandbox node 全綠 + tsc --strict、--noUnusedLocals/Parameters 通過)；GanttService(getProjectGantt / getProjectGanttFresh 先回寫步驟比例再產生)；projects.module 註冊並 export GanttService。沿用既有 schema 不新增 migration。REST/UI 屬後續 |
 | 5.3 | #25 延遲／超前計算 | ✅ done | apps/api `projects/` delay-engine 純引擎(重用 5.2 expectedProgress/classifyFlowStatus 判五態 + 差異百分比→差異天數換算、日曆日/工作日基準可選、依流程型別覆寫容許門檻 T、完成/未開始差異天數歸零)、**22 案測試**(sandbox tsc --strict + node 全綠)；DelayService(getProjectDelays/getProjectDelaysFresh，WORKDAY 基準經 CalendarService.buildCalendar + businessDaysBetween 注入)；projects.module 註冊 DelayService(imports CalendarModule)。沿用既有 schema 不新增 migration。REST/UI 屬後續 |
 | 5.4 | #26 專案行事曆排除日 | ✅ done | 排除日 CRUD（ExclusionService: add/list/update/removeExclusion）+ 純引擎驗證（exclusion-engine: from<=to/reason 必填/source 限 CUSTOMER·INTERNAL/UTC 日界，含 isDateExcluded·exclusionCalendarDays）+ 時程避讓（deferDateAvoidingExclusions·rescheduleWithExclusions 委派 4.1 CalendarService，排除日與假日併行）；甘特圖網底沿用 5.2 gantt-engine 讀同一張 Exclusion 表。**引擎+服務 spec 共 35 案於 sandbox(tsc --strict node16 + 自製 jest-runner) 全綠**；驗收要點達成（甘特即時呈現 by 5.2、時程避開 by CalendarService 委派）。§9-5（全專案 vs 特定流程）、§9-6（planEnd 自動順延規則）屬待釐清業務規則、非本 issue 驗收阻擋項，刻意未臆測 planEnd 自動順延，待人類定案後再開 follow-up |
-| 5.5~6.2 | #27-#30 | 待辦 | 依 WBS 順序（下一輪：#27 5.5 簡報模式） |
+| 5.5 | #27 簡報模式 | ✅ done | **apps/web 新增前端 feature `project-gantt`**：`presentation.ts` 簡報模式純邏輯(ViewMode 切換/derivePresentationLayout 版面推導/presentationKeydown F·P·Esc 鍵盤/statusMeta 五態繁中標籤+色/buildKpiCards·selectKpiCards/presentationHeadline 摘要、**所有函式純讀取不變動資料**)、**39 案測試**(presentation.test.ts vitest；sandbox 因 vitest worker bus error 改以自製 harness 全綠 PASS=39，source tsc --strict + --noUnusedLocals/Parameters 通過)；`ProjectGanttView.tsx` 甘特呈現(月份刻度/流程長條+完成填色/今日線/排除日網底/KPI)與一鍵簡報模式(隱藏側欄與次要 chrome、放大時間軸與重點 KPI、fixed 沉浸覆蓋層 + best-effort Fullscreen API)；`types.ts`(GanttView 前端鏡像)、`seed.ts`(REST 未就緒前示範資料)、`styles.ts`、`index.ts`；App.tsx 新增「專案進度」分頁。**資料源為 seed 範例**(REST 層尚未提供)，待 API 就緒改 fetch 即可 |
+| 5.6~6.2 | #28-#30 | 待辦 | 依 WBS 順序（下一輪：#28 5.6 專案↔案件雙向導覽） |
+
+## 5.5 交付物（#27，簡報模式，專案管理模組規格 §5.4 / §10.6）
+- `apps/web/src/features/project-gantt/`：前端「專案進度甘特圖 + 簡報模式」feature（沿用 workflow-designer 的「純邏輯 .ts（vitest 測） + .tsx 元件 + types/styles/index」風格）。
+  - `presentation.ts`：**純邏輯**（不依賴 DOM/React，可純函式測試）。簡報模式核心精神＝只切換「呈現版面」，**絕不變動任何專案/流程資料**，故所有函式皆純讀取/推導。
+    - `ViewMode`('NORMAL'|'PRESENTATION')、`toggleMode`、`isPresentation`。
+    - `derivePresentationLayout(mode)`→`PresentationLayout`(showSidebar/showSecondaryChrome/immersive/fontScale/rowHeightPx/timelineMinHeightPx)；**回傳凍結常數的副本**避免共享可變狀態。簡報模式：隱藏側欄與次要 chrome、沉浸、字級×1.5、列高與時間軸放大。
+    - `presentationKeydown(key, current)`：Esc→永遠 NORMAL；F/P(不分大小寫)→切換；其他鍵→null(呼叫端忽略)。
+    - `statusMeta(status)`：五態(COMPLETED/ON_TIME/AHEAD/DELAYED/NOT_STARTED)繁中標籤 + 主色 + 淡底色，供長條/膠囊著色。`formatDelta(delta)`→+N/-N/0。
+    - `buildKpiCards(kpis)`→7 張卡(整體進度/延遲/超前/準時/已完成/未開始/排除日區間，延遲與整體進度為 highlight 重點卡)；`selectKpiCards(kpis, mode)`：簡報只挑重點卡、一般呈現全部。`presentationHeadline(view)`→一句話摘要(如「整體進度 61%，1 個流程延遲」)。
+  - `presentation.test.ts`：vitest 單元測試 **39 案**。sandbox 中 vitest worker 觸發 bus error(環境資源限制、非程式問題)，改以等價自製 harness 跑全綠(PASS=39 FAIL=0)；source(presentation.ts/seed.ts/types.ts/ProjectGanttView.tsx) 過 tsc --strict + --noUnusedLocals/--noUnusedParameters。涵蓋切換、版面推導(含副本隔離)、鍵盤、狀態標籤、delta 格式、KPI 卡(重點卡/延遲 0 轉 muted/簡報少於一般)、摘要三分支、**不變動資料**(JSON snapshot 比對)。
+  - `ProjectGanttView.tsx`：甘特圖元件(月份刻度/流程長條+完成填色/今日基準線/排除日網底/KPI 面板)，依比例(0..1)繪製像素、不重算業務邏輯。一鍵簡報：按鈕 + F/P/Esc 鍵盤(委派 presentationKeydown)、fixed 全螢幕沉浸覆蓋層 + best-effort 瀏覽器 Fullscreen API(失敗靜默不影響版面)。
+  - `types.ts`：後端 `GanttView` 之前端鏡像(結構複製、解耦)。`seed.ts`：一筆固定範例專案(軸 2026-01-01~2026-07-31、基準日 2026-06-06)，供 REST 就緒前驅動 UI 與展示。`styles.ts`/`index.ts`。
+  - `apps/web/src/App.tsx`：新增「專案進度」分頁，掛載 `<ProjectGanttView />`。
+- **決策（5.5）**：簡報模式以「版面狀態(ViewMode) + 純推導 layout/KPI 選取」實作，與資料完全分離；元件僅依 layout 旗標切換顯示、不改任何資料物件。**理由**：直接滿足驗收「不影響資料」，且核心邏輯可純函式測試(沿用 designer.ts 風格)。
+- **決策（5.5）**：沉浸採 fixed 全螢幕覆蓋層為主、瀏覽器 Fullscreen API 為加分項(best-effort、失敗靜默)。**理由**：Fullscreen API 需使用者手勢且各環境/SSR 支援不一，覆蓋層已達會議簡報所需的「隱藏次要介面、放大重點」效果，不讓加分項成為阻擋。
+- **決策（5.5）**：因 REST/控制器層尚未提供(見 Handoff 第 9 項)，本輪以 `seed.ts` 範例 GanttView 驅動 UI 使簡報模式可實際操作。**理由**：小步前進、先交付可操作的簡報體驗；資料接線待 API 任務，屆時把 seed 換成 fetch 即可，元件與純邏輯不需改動。
 
 ## 5.3 交付物（#25，延遲／超前計算，規格 §4.2–§4.4 / §5.1 狀態清單）
 - `apps/api/src/projects/delay-engine.ts`：延遲／超前**純邏輯**（無 DB/Nest/Prisma/CalendarService 相依，日界一律 UTC，與 5.2 同風格）。
@@ -62,6 +79,7 @@
 - `apps/api/src/projects/gantt-engine.spec.ts`：jest 單元測試 **27 案**(sandbox 以 tsc CommonJS + node 跑全綠；引擎另過 tsc --strict + --noUnusedLocals/--noUnusedParameters)。涵蓋 ratioOf 端點/夾擠/零跨距、expectedProgress 線性與零工期、狀態分類五態與邊界、月份刻度跨年、buildGantt 整合(軸涵蓋/今日線位置/長條端點/狀態/KPI/排除日網底/軸自動延展/無流程)、錯誤處理。
 - `apps/api/src/projects/gantt.service.ts`：`GanttService`(Prisma + ProjectService)：`getProjectGantt(projectId, {now?, toleranceThreshold?})`(讀 Project + flows + exclusions → buildGantt)、`getProjectGanttFresh`(先對有 caseId 的流程 `refreshFlowProgress` 回寫步驟比例，再產生甘特圖，反映最新完成度 §6.2)。
 - `apps/api/src/projects/projects.module.ts` / `index.ts`：註冊並 export `GanttService`、匯出 gantt-engine / gantt.service。
+- **前端（5.5 補充）**：5.5 已在 `apps/web` 新增 `project-gantt` feature 將本引擎的 `GanttView` 結構繪製為甘特圖(以前端鏡像型別解耦)，並提供簡報模式。後端 REST controller 仍待後續 API 任務。
 
 ## 5.1 交付物（#23，專案 CRUD 與流程串接，§3/§5.1/§6.1）
 - `apps/api/src/projects/`：後端「專案管理」模組（對應專案管理模組規格 §3、§5.1、§6.1）。
@@ -185,17 +203,20 @@
 - **決策（5.2）**：時間軸範圍取 min(專案 planStart, 所有流程 planStart)..max(專案 planEnd, 所有流程 planEnd)，使超出專案計畫期間的流程(§3.2 允許重疊/先後)仍完整可見；今日線超出軸時夾擠並標 `inRange=false`。**理由**：避免長條被裁切；今日線位置正確為驗收要點。
 - **決策（5.2）**：延遲/超前狀態沿用規格 §4.2 線性預期 + §4.3 delta/容許門檻 T，T 先用引擎預設 8(§9-2 待定案，可由 GanttService 呼叫端覆寫)。**理由**：5.2 KPI 需「延遲數/超前數」，必須先有狀態判斷；完整的 5.3(天數換算、依流程型別不同門檻)留 #25。
 - **決策（5.2）**：排除日在甘特圖**僅作網底標示與 KPI 區間計數**，不在此順延 planEnd。**理由**：順延重算(串接 4.1 reschedule)屬 5.4 #26，避免越界改動流程計畫日。
+- **決策（5.5）**：簡報模式以「呈現版面狀態(ViewMode) + 純函式推導 layout/KPI 選取」實作，與資料完全分離；前端元件僅依 layout 旗標切換顯示、不改任何資料物件(測試以 JSON snapshot 驗證不變動)。**理由**：直接滿足 issue「不影響資料」驗收，核心邏輯可純函式測試(沿用 designer.ts 風格)。
+- **決策（5.5）**：沉浸以 fixed 全螢幕覆蓋層為主、瀏覽器 Fullscreen API 為 best-effort 加分(失敗靜默)。**理由**：Fullscreen API 需使用者手勢、各環境支援不一，覆蓋層已達「隱藏次要介面、放大重點」的會議簡報需求，不讓加分項成阻擋。
+- **決策（5.5）**：前端以 `types.ts` 鏡像後端 `GanttView` 結構(解耦)，比例化資料直接繪製、不重算業務邏輯。**理由**：與既有跨模組解耦風格一致；REST 就緒後把 seed 換 fetch 即可，元件與純邏輯不動。
 
 ## 未完成 / Handoff（下一輪或人類接手）
 1. ✅（3.1）拜訪/會議紀錄 + 成案移交藍圖持久化落地（getHandoff 可取回）。
 2. ✅（3.2）系統導入流程引擎 + 服務落地：接收銷售移交、預定義時間點/提醒、委任權限表簽核把關、**移交工程建立 ENVIRONMENT 案件**。
 3. ✅（3.3）環境建置流程引擎 + 服務落地：依銷售模式分支、接收導入移交、主機採購等待狀態、環境驗收把關→COMPLETED。
-4. **CI 全流程驗證**：3.3/3.4/4.1/4.2/5.1/5.2/5.3/5.4 引擎 + spec 已於 sandbox 驗證(tsc --strict + node 測試全綠)；各 `*.service.ts`（含 projects、gantt、delay、exclusion） 以 stub(PrismaService/@nestjs/common/@prisma/client) 通過 strict typecheck（5.1/5.2 另過 --noUnusedLocals/--noUnusedParameters），惟未在真實 monorepo 跑 `pnpm -r build`(需 generated Prisma client)。下輪/人類 review 時請確認 CI build 綠。
+4. **CI 全流程驗證**：3.3/3.4/4.1/4.2/5.1/5.2/5.3/5.4 引擎 + spec 已於 sandbox 驗證(tsc --strict + node 測試全綠)；各 `*.service.ts`（含 projects、gantt、delay、exclusion） 以 stub(PrismaService/@nestjs/common/@prisma/client) 通過 strict typecheck（5.1/5.2 另過 --noUnusedLocals/--noUnusedParameters），惟未在真實 monorepo 跑 `pnpm -r build`(需 generated Prisma client)。**5.5 前端 project-gantt 已於 sandbox 過 tsc --strict + --noUnusedLocals/Parameters；presentation.test.ts 因 vitest worker 在 sandbox 觸發 bus error 改以等價 harness 全綠，請 review 時在真實環境跑 `pnpm --filter @wfms/web test` 確認 vitest 綠**。下輪/人類 review 時請確認 CI build 綠。
 5. ✅（3.4）客製化（需求變更）流程引擎 + 服務落地：需求變更單→指派鏈→開發/測試文件→複測（不通過退回循環）→測試區→正式區兩道關卡→COMPLETED。
 6. ✅（4.1）曆法遞延引擎 + CalendarService 已落地：可產生 `isExcluded` predicate 注入 onboarding/environment `buildSchedule`、支援兩種遞延模式重算、整合專案排除日(§10.5)。**仍待整合**：將 onboarding/environment service 實際呼叫 `CalendarService.buildIsExcluded()` 注入 buildSchedule(目前仍為預設 identity，未串接)；持久化假日來源(Holiday 表 / 政府行事曆匯入，§12-5)；遞延模式政策定案(目前預設 NEXT_WORKDAY)。
 7. ✅（4.2）提醒與通知引擎 + ReminderService 已落地：多時點提醒、提醒日隨到期日遞延同步、可插拔多管道(本輪僅 IN_APP 落地)、跨輪去重。**仍待**：(a) Email/其他管道 dispatcher 接外部服務並 `registerDispatcher`(§12-7)；(b) **定時觸發**——目前 `dispatchDueReminders(caseId, {now})` 為被呼叫式，尚未接排程器(cron/任務佇列)定期掃描全案件派送；(c) 提醒規則(時點密度)是否需可由流程設計器設定；(d) StepInstance.dueDate 來源——需與 5.x 專案管理/流程推進實際把 dueDate 寫入 StepInstance 後，提醒才有資料。
-8. ✅（5.1）專案 CRUD 與流程串接引擎 + ProjectService 已落地。✅（5.2）甘特圖呈現引擎 + GanttService 已落地。✅（5.3）延遲/超前計算引擎 + DelayService 已落地(#25)。✅（5.4）排除日 CRUD（ExclusionService）+ exclusion-engine 驗證 + 時程避讓（委派 CalendarService）已落地並驗證（引擎+服務 35 案於 sandbox 全綠 + tsc --strict 通過；驗收要點達成，#26 標 done）。**仍待**：(b) §9-6 確認後將「排除日落入流程區間自動順延 ProjectFlow.planEnd」串接（目前 reschedule 僅回傳結果不寫回 planEnd）、§9-5 是否區分全專案/特定流程（現 Exclusion 僅 projectId）、於真實 monorepo 跑完整 pnpm jest；(c) **5.5 簡報模式**(#27)、**5.6 案件↔專案雙向導覽**(#28：gantt rows 已透傳 caseId、getProjectDetail 已回傳步驟，UI 跳轉待補)；(d) 進度認定方式 §9-1 定案(目前預設步驟比例)。
-9. **REST controller / 前端 UI**：sales / onboarding / environment / customization / calendar / reminders / **projects(含甘特圖、延遲清單、排除日管理)** 皆尚未提供（屬後續 API 層任務；reminders 另需「通知中心」前端與已讀互動；projects 需專案管理主畫面、甘特圖繪製與簡報模式）。
+8. ✅（5.1）專案 CRUD 與流程串接引擎 + ProjectService 已落地。✅（5.2）甘特圖呈現引擎 + GanttService 已落地。✅（5.3）延遲/超前計算引擎 + DelayService 已落地(#25)。✅（5.4）排除日 CRUD（ExclusionService）+ exclusion-engine 驗證 + 時程避讓（委派 CalendarService）已落地並驗證（#26 標 done）。✅（5.5）簡報模式(#27)已落地：apps/web 新增 `project-gantt` 前端 feature(甘特呈現 + 一鍵簡報模式 + 純邏輯測試)。**仍待**：(b) §9-6 確認後將「排除日落入流程區間自動順延 ProjectFlow.planEnd」串接、§9-5 是否區分全專案/特定流程；(c) **5.6 案件↔專案雙向導覽**(#28：gantt rows 已透傳 caseId、getProjectDetail 已回傳步驟，前端 project-gantt 列已帶 caseId，UI 跳轉與案件→專案反向待補)；(d) 進度認定方式 §9-1 定案(目前預設步驟比例)。
+9. **REST controller / 前端 UI**：sales / onboarding / environment / customization / calendar / reminders / **projects(含甘特圖、延遲清單、排除日管理)** 後端 REST controller 皆尚未提供（屬後續 API 層任務；reminders 另需「通知中心」前端與已讀互動）。**前端進度**：apps/web 已有 workflow-designer(2.2) 與 **project-gantt(5.5：甘特圖呈現 + 簡報模式，目前以 seed 範例資料驅動，待 REST 就緒改 fetch)**；專案管理主畫面的 CRUD/排除日管理 UI、延遲清單 UI 仍待補。
 10. **服務層整合測試**：sales/onboarding/environment/customization/reminders/projects/gantt/delay/exclusion service 目前僅引擎層純函式測試覆蓋；DB 行為待後續以整合測試補強。
 
 ## 待釐清（沿用，需求 §12 / 專案管理模組規格 §9）
@@ -209,3 +230,4 @@
 - 專案管理模組規格 §9-1 進度認定方式（步驟比例/加權工時/人工填報）→ **5.1 先以步驟完成比例為預設並保留 progress 可人工覆寫，待主管定案**。
 - 專案管理模組規格 §9-2/§9-3/§9-6 容許門檻 T、預期進度日曆日或工作日基準、排除日順延規則 → 影響 5.2/5.3/5.4：**5.2 甘特圖已用 §4.2 線性預期 + §4.3 預設 T=8 呈現狀態；5.3 延遲/超前已實作天數換算、依流程型別覆寫 T、CALENDAR/WORKDAY 基準可選(預設值待主管定案)；5.4 排除日 CRUD/時程避讓已落地並驗證**；排除日順延 planEnd 待主管定案(§9-6)後再串接。
 - 專案管理模組規格 §9-5 排除日是否區分「全專案」與「特定流程」→ 目前 Exclusion 僅 projectId(全專案)，5.4 未臆測；待主管定案後決定是否加 flowId 維度。
+- 專案管理模組規格 §10.6 簡報模式呈現範圍/版面細節 → **5.5 已落地一鍵簡報(隱藏側欄與次要 chrome、放大時間軸與重點 KPI、沉浸覆蓋層)，目前以 seed 範例驅動；實際要呈現哪些重點欄位/是否需逐流程翻頁等細節待主管試用後回饋調整**。
