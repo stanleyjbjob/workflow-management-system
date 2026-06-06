@@ -9,6 +9,7 @@ import { HealthController } from './health/health.controller';
 import { OnboardingModule } from './onboarding/onboarding.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { RbacModule } from './rbac/rbac.module';
+import { RemindersModule } from './reminders/reminders.module';
 import { SalesModule } from './sales/sales.module';
 import { TemplatesModule } from './templates/templates.module';
 import { WorkflowModule } from './workflow/workflow.module';
@@ -27,6 +28,7 @@ import { WorkflowModule } from './workflow/workflow.module';
     EnvironmentModule,
     CustomizationModule,
     CalendarModule,
+    RemindersModule,
   ],
   controllers: [HealthController],
 })
