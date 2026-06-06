@@ -1,5 +1,7 @@
 export * from './project-engine';
 export * from './project.service';
+export * from './exclusion-engine';
+export * from './exclusion.service';
 export * from './gantt-engine';
 export * from './gantt.service';
 export * from './delay-engine';
