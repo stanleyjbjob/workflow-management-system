@@ -27,7 +27,8 @@
 | 3.1 | #17 銷售流程 | ✅ done | 引擎(商機/紀錄/成案移交/失敗統計)+紀錄序列化 + 移交藍圖序列化(sales-handoff) + SalesService、引擎35+移交6 測試。REST/UI 屬後續 |
 | 3.2 | #18 系統導入流程 | ✅ done | apps/api `onboarding/` 純引擎 + OnboardingService、26 項 jest 單元測試；handoffToEngineering 建立 ENVIRONMENT 案件。REST/UI 屬後續 |
 | 3.3 | #19 環境建置流程 | ✅ done | apps/api `environment/` 純引擎(依銷售模式分支買斷/訂閱、接收導入移交、主機採購等待狀態、表單齊備+環境驗收把關、接收藍圖序列化)、55 項測試(sandbox 全綠 + tsc --strict 通過)；EnvironmentService(receiveFromOnboarding/recordHostProcurement+等待狀態 ON_HOLD/getHostReadiness/submitEnvironmentForm/getFormStatuses/completeEnvironment→COMPLETED)；app.module 註冊 EnvironmentModule。REST/UI 屬後續 |
-| 3.4~6.x | #20-#30 | 待辦 | 依 WBS 順序 |
+| 3.4 | #20 客製化（需求變更）流程 | ✅ done | apps/api `customization/` 純引擎(指派鏈把關/狀態機/複測退回循環/測試區→正式區兩道關卡/需求變更單序列化)、40 項測試(sandbox 全綠 + tsc --strict 通過)；CustomizationService(raiseChangeRequest/assignEngLead/assignEngineer/submitForm/submitForRetest/recordRetest/confirmTestDeploy/confirmProdDeploy + append-only 狀態事件持久化)；app.module 註冊 CustomizationModule。REST/UI 屬後續 |
+| 4.x~6.x | #21-#30 | 待辦 | 依 WBS 順序 |
 
 ## 3.3 交付物（#19，環境建置流程，§6）
 - `apps/api/src/environment/`：後端「環境建置流程」模組（對應需求規格 §6）。
@@ -43,6 +44,21 @@
   - `environment.module.ts` / `index.ts`：`EnvironmentModule`（imports PrismaModule + OnboardingModule）。
 - `apps/api/src/app.module.ts`：註冊 `EnvironmentModule`。
 
+## 3.4 交付物（#20，客製化（需求變更）流程，§7）
+- `apps/api/src/customization/`：後端「客製化（需求變更）流程」模組（對應需求規格 §7）。
+  - `customization-engine.ts`：**純邏輯**（無 DB/Nest 相依，與 2.x/3.1/3.2/3.3 同風格）。
+    - 步驟與表單（§7.2）：`CustomizationStep` 八步驟、各表單 code 常數（需求變更單/開發任務單/開發紀錄/測試文件/複測報告/測試區更新紀錄/正式區上線紀錄）、`DEFAULT_CUSTOMIZATION_STEPS` 預定義骨架。
+    - 狀態機（§7 指派鏈＋退回循環＋兩道關卡）：`CustomizationState`(8 態)/`CustomizationAction`(8 動作)/`TRANSITIONS` 轉移表、`nextState`/`canTransition`/`isReturnAction`。關鍵：`RETEST_FAIL` 由 IN_RETEST 回到 IN_DEVELOPMENT 形成複測退回循環。
+    - 指派鏈把關（§7.2 步驟2/3）：`planAssignLead`(期望 ENG_LEAD)/`planAssignEngineer`(期望 ENGINEER)，比對被指派人角色(roleMatches；未提供＝null 未驗證，不強制 §12-1)。
+    - 送交複測把關（§7.2 步驟4/5）：`planSubmitForRetest` 需開發紀錄＋測試文件齊備否則 `forms_incomplete`。
+    - 複測退回循環（§7.3）：`applyRetestResult`(僅 IN_RETEST；通過→DEPLOYING_TEST、不通過→IN_DEVELOPMENT 並退回次數+1)。
+    - 兩道關卡（§7.2 步驟7/8、§7.3）：`planTestDeployment`(非 DEPLOYING_TEST→`retest_not_passed`、測試區紀錄未齊→`forms_incomplete`)、`planProductionDeployment`(非 DEPLOYING_PROD→`test_deploy_pending`、正式區紀錄未齊→`forms_incomplete`)；測試區/正式區為不同表單代碼分別記錄。
+    - 需求變更單持久化：`buildChangeRequest`(clientName/title 必填否則 `request_invalid`、carriedDocRefIds 去重)、`serialize/deserializeChangeRequest`(毀損拋 `request_corrupt`)。
+  - `customization-engine.spec.ts`：jest 單元測試 **40 項**（sandbox node 驗證全綠、tsc --strict 通過）。
+  - `customization.service.ts`：`CustomizationService`（Prisma）：raiseChangeRequest / getChangeRequest / assignEngLead / assignEngineer / submitForm / getFormStatuses / submitForRetest / recordRetest / confirmTestDeploy / confirmProdDeploy / getState / getReturnCount。流程狀態以 append-only `CUSTOMIZATION_STATE` 狀態事件表單持久化（讀最近一筆還原、統計 returned 退回次數）；案件 status 反映 IN_PROGRESS/COMPLETED。
+  - `customization.module.ts` / `index.ts`：`CustomizationModule`（imports PrismaModule）。
+- `apps/api/src/app.module.ts`：註冊 `CustomizationModule`。
+
 ## 技術決策（供 review）
 - **決策**：沿用 2.x/3.1/3.2「純引擎 + Service」風格，引擎不依賴 DB 可被純函式測試。**理由**：一致、可測。
 - **決策（3.3）**：environment-engine 與 onboarding 解耦（以結構型別 `EnvironmentHandoffLike` 接收移交藍圖）；服務層才呼叫 `OnboardingService.getEngineeringHandoff` 串接。**理由**：避免跨流程模組強耦合（與 3.2 對 sales 一致）。
@@ -50,22 +66,26 @@
 - **決策（3.3）**：缺銷售模式時 `resolveBranch` 直接拋 `sale_mode_required`（不臆測分支）。**理由**：§6.1 買斷/訂閱走不同建置分支，銷售模式為必要前提；正常情況 saleMode 由銷售→導入→環境建置一路帶往。
 - **決策（3.3）**：環境驗收以「驗收表齊備」認定，未強制簽核（`ENV_SIGNABLE_FORM_CODES`=空，保留介面）。**理由**：§6 未明定強制簽核關卡（§12-4 待釐清）。
 - （沿用 3.2）表單與藍圖以既有 `FormSubmission` append-only 落地、固定 code 的 FormDefinition 容器（resolve-or-create），不新增 migration。
+- **決策（3.4）**：客製化流程狀態（CustomizationState）以 append-only `CUSTOMIZATION_STATE` 狀態事件表單持久化（讀最近一筆還原、依 returned 統計退回次數），不在 Case 上新增欄位、不新增 migration。**理由**：沿用 3.3「以 FormSubmission 落地流程資訊」風格；退回循環的歷史軌跡（§8.4 永久留存）天然落在事件日誌中，亦符合 §11 ISO 文件化軌跡。
+- **決策（3.4）**：流程狀態機（CustomizationState）與 schema `CaseStatus` 解耦——前者描述「流程進到哪一步」（8 態，含退回），後者反映案件生命週期（IN_PROGRESS/COMPLETED）供 5.x 甘特圖。**理由**：§7 步驟細緻且含循環，硬塞進 CaseStatus 會失真。
+- **決策（3.4）**：指派鏈角色（顧問/工程主管/工程師）以引擎 `planAssign*` 比對被指派人角色但**不強制**（roleMatches 僅回報，null＝未提供）。**理由**：§12-1 跨角色移交是否需核可未定，先回報不阻擋；服務層以 RBAC/Case.assigneeId 落地。
+- **決策（3.4）**：服務層操作既有 CUSTOMIZATION 案件（caseId 由呼叫端提供），不在此建立 Case/WorkflowDefinition。**理由**：與 3.3 一致；流程定義由 8.x/設計器產生。
 
 ## 未完成 / Handoff（下一輪或人類接手）
 1. ✅（3.1）拜訪/會議紀錄 + 成案移交藍圖持久化落地（getHandoff 可取回）。
 2. ✅（3.2）系統導入流程引擎 + 服務落地：接收銷售移交、預定義時間點/提醒、委任權限表簽核把關、**移交工程建立 ENVIRONMENT 案件**。
 3. ✅（3.3）環境建置流程引擎 + 服務落地：依銷售模式分支、接收導入移交、主機採購等待狀態、環境驗收把關→COMPLETED。
 4. **CI 全流程驗證**：3.3 引擎 + spec 已於 sandbox 驗證（55 測試綠 + tsc --strict）；`environment.service.ts` 以 stub（PrismaService/OnboardingService/@nestjs/common）通過 strict typecheck，惟未在真實 monorepo 跑 `pnpm -r build`（需 generated Prisma client）。下輪/人類 review 時請確認 CI build 綠。
-5. **客製化（需求變更）流程（3.4 #20）**：可接續——上線後客戶需求觸發；顧問發起→工程主管指派→工程師開發→顧問複測→測試區→正式區（§7，含複測不通過退回循環）。
+5. ✅（3.4）客製化（需求變更）流程引擎 + 服務落地：需求變更單→指派鏈→開發/測試文件→複測（不通過退回循環）→測試區→正式區兩道關卡→COMPLETED。下一個可動工：4.1 行事曆遞延（#21）/ 4.2 提醒（#22）。
 6. **提醒派送（4.2）/ 曆法遞延（4.1）**：onboarding `dueReminders` 已算出需提醒清單、`buildSchedule` 已留 `isExcluded` 介面；環境建置時程提醒亦可沿用。實際通知管道（§12-7）與國定假日來源（§12-5）待 4.x。
-7. **REST controller / 前端 UI**：sales / onboarding / environment 皆尚未提供（屬後續 API 層任務）。
-8. **服務層整合測試**：sales/onboarding/environment service 目前僅引擎層純函式測試覆蓋；DB 行為待後續以整合測試補強。
+7. **REST controller / 前端 UI**：sales / onboarding / environment / customization 皆尚未提供（屬後續 API 層任務）。
+8. **服務層整合測試**：sales/onboarding/environment/customization service 目前僅引擎層純函式測試覆蓋；DB 行為待後續以整合測試補強。
 
 ## 待釐清（沿用，需求 §12）
-- §12-1 跨角色移交是否需主管核可、流程一律由特定角色發起 → 設計器已留「觸發角色＋條件」欄位，實際核可關卡待釐清。
+- §12-1 跨角色移交是否需主管核可、流程一律由特定角色發起 → 設計器已留「觸發角色＋條件」欄位，實際核可關卡待釐清（3.4 指派鏈已留 roleMatches 回報、未強制）。
 - §12-2 失敗原因分類項目（供改善分析報表）→ 影響 3.1 失敗分類 Enum 收斂，目前以可擴充字串承載。
 - §12-3 各表單實際欄位（報價單/客製需求/委任權限表/人員資料表/環境建置檢核表等）→ 目前僅以 code 標識容器、data 承載 JSON。
-- §12-4 各表單簽核關卡與層級 → 影響環境驗收是否需顧問簽核（3.3 目前未強制，保留簽核集合介面）。
+- §12-4 各表單簽核關卡與層級 → 影響環境驗收/客製化複測是否需簽核（3.3/3.4 目前未強制，保留簽核集合介面）。
 - §12-5 行事曆遞延規則（順延下一工作日/整體後推）→ onboarding `buildSchedule` 已留 `isExcluded`，曆法來源待 4.1。
 - §12-7 提醒管道（系統內/Email/其他）→ 影響 4.2 與 onboarding `dueReminders` 派送。
 - §12-10 附件/範本實體儲存於系統或改以 SharePoint/OneDrive 連結為主、允許檔案類型與大小上限 → 影響 2.4/2.5 上傳實作，待主管確認。
