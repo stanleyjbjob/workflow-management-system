@@ -23,6 +23,12 @@ import {
   sortRecordsChronological,
   summarizeFailureReasons,
 } from './sales-engine';
+import {
+  HandoffData,
+  SALES_HANDOFF_FORM_CODE,
+  deserializeHandoff,
+  serializeHandoff,
+} from './sales-handoff';
 
 /**
  * 銷售流程服務（NestJS）。將 sales-engine 的純決策落實到 Prisma。
@@ -89,6 +95,29 @@ export class SalesService {
         code: SALES_RECORD_FORM_CODE,
         name: '銷售拜訪／會議紀錄',
         description: '銷售流程拜訪 / Demo / 會議紀錄（append-only，永久留存，§4.6）',
+        isSignable: false,
+      },
+      select: { id: true },
+    });
+  }
+
+  /**
+   * 解析（或首次初始化）承載「成案移交藍圖」的專用表單定義。
+   * 與拜訪紀錄同樣以 append-only 的 FormSubmission 落地，需一個 code 固定的
+   * FormDefinition 作為容器；第一次成案時自動建立。
+   */
+  private async resolveSalesHandoffForm(): Promise<{ id: string }> {
+    const existing = await this.prisma.formDefinition.findFirst({
+      where: { code: SALES_HANDOFF_FORM_CODE },
+      orderBy: { version: 'desc' },
+      select: { id: true },
+    });
+    if (existing) return existing;
+    return this.prisma.formDefinition.create({
+      data: {
+        code: SALES_HANDOFF_FORM_CODE,
+        name: '銷售成案移交藍圖',
+        description: '成案時自動帶往導入 / 客製化階段的產出引用（append-only，§4.6）',
         isSignable: false,
       },
       select: { id: true },
@@ -179,7 +208,39 @@ export class SalesService {
       where: { id: caseId },
       data: { status: CaseStatus.COMPLETED, failureReason: null },
     });
+    // 將移交藍圖 append-only 落地，使「成案產出自動帶往導入」durable（§4.6）：
+    // 後續導入 / 客製化流程可經 getHandoff 取回已帶往的產出引用。
+    const handoffForm = await this.resolveSalesHandoffForm();
+    await this.prisma.formSubmission.create({
+      data: {
+        formDefinitionId: handoffForm.id,
+        caseId,
+        status: SubmissionStatus.SUBMITTED,
+        data: serializeHandoff(handoff) as never,
+        submittedById: null,
+      },
+      select: { id: true },
+    });
     return handoff;
+  }
+
+  /**
+   * 取回某案件最近一次成案的移交藍圖（供導入 / 客製化流程引用，§4.6）。
+   * 尚未成案 / 無移交資料時回傳 null。
+   */
+  async getHandoff(caseId: string): Promise<HandoffData | null> {
+    const form = await this.prisma.formDefinition.findFirst({
+      where: { code: SALES_HANDOFF_FORM_CODE },
+      orderBy: { version: 'desc' },
+      select: { id: true },
+    });
+    if (!form) return null;
+    const sub = await this.prisma.formSubmission.findFirst({
+      where: { caseId, formDefinitionId: form.id },
+      orderBy: { createdAt: 'desc' },
+      select: { data: true },
+    });
+    return sub ? deserializeHandoff(sub.data) : null;
   }
 
   /** 失敗結案：Case 轉 FAILED，留存結構化失敗原因（category|reason）。 */
