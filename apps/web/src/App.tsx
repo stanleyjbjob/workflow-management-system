@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react';
 import { WorkflowDesigner } from './features/workflow-designer';
-import { ProjectGanttView } from './features/project-gantt';
+import { ProjectManagement } from './features/project-management';
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
 
-type Tab = 'status' | 'designer' | 'projects';
+type Tab = 'status' | 'designer' | 'project';
 
 export function App(): JSX.Element {
   const [tab, setTab] = useState<Tab>('designer');
@@ -40,12 +40,12 @@ export function App(): JSX.Element {
       <h1 style={{ marginBottom: '0.25rem' }}>工作流程管理系統</h1>
       <nav style={{ borderBottom: '1px solid #e2e8f0', marginBottom: '1rem' }}>
         {tabBtn('designer', '流程定義設計器')}
-        {tabBtn('projects', '專案進度')}
+        {tabBtn('project', '專案管理')}
         {tabBtn('status', '系統狀態')}
       </nav>
 
       {tab === 'designer' && <WorkflowDesigner />}
-      {tab === 'projects' && <ProjectGanttView />}
+      {tab === 'project' && <ProjectManagement />}
       {tab === 'status' && (
         <section>
           <p>API 健康狀態：<strong>{apiStatus}</strong></p>
