@@ -16,10 +16,11 @@ jobs:
       # 避免與 action 輸入重複導致 ERR_PNPM_BAD_PM_VERSION。
       - uses: pnpm/action-setup@v4
 
+      # 不開啟 pnpm 快取：repo 未提交 pnpm-lock.yaml（install 以 --frozen-lockfile=false 執行），
+      # setup-node 的 cache: pnpm 需以 lockfile 為快取 key，缺檔會直接報錯。
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile=false
