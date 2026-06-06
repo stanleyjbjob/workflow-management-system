@@ -13,7 +13,7 @@ import {
 } from './presentation';
 import { sampleProjectGantt } from './seed';
 import { ui } from './styles';
-import type { ProjectGanttData } from './types';
+import type { GanttRow, ProjectGanttData } from './types';
 
 const TONE_COLOR: Record<string, string> = {
   primary: '#2563eb',
@@ -37,18 +37,29 @@ function syncFullscreen(immersive: boolean): void {
   }
 }
 
+/** 流程列是否可跳轉案件（有 caseId 且呼叫端有提供 onSelectCase）。 */
+function rowJumpable(row: GanttRow, onSelectCase?: (caseId: string) => void): boolean {
+  return !!onSelectCase && row.caseId != null && row.caseId !== '';
+}
+
 export interface ProjectGanttViewProps {
   /** 專案甘特資料；未提供時使用 seed 範例（REST 層就緒前）。 */
   data?: ProjectGanttData;
+  /**
+   * 點擊有對應案件之流程列時的回呼（issue #28，5.6）。
+   * 未提供時流程列不提供跳轉（§5.3「無對應案件之流程不提供跳轉」亦含此情況）。
+   */
+  onSelectCase?: (caseId: string) => void;
 }
 
 /**
- * 專案進度甘特圖 + 簡報模式（issue #27，5.5）。
+ * 專案進度甘特圖 + 簡報模式（issue #27，5.5）+ 案件雙向導覽（issue #28，5.6）。
  *
  * 簡報模式：一鍵切換，隱藏側欄與次要工具列、放大時間軸與重點 KPI、進入沉浸版面，
  * 並支援鍵盤（F/P 切換、Esc 退出）。所有切換僅影響呈現版面，不變動任何資料。
+ * 雙向導覽：有對應案件（caseId）之流程列可點擊跳轉案件詳情。
  */
-export function ProjectGanttView({ data = sampleProjectGantt }: ProjectGanttViewProps): JSX.Element {
+export function ProjectGanttView({ data = sampleProjectGantt, onSelectCase }: ProjectGanttViewProps): JSX.Element {
   const [mode, setMode] = useState<ViewMode>('NORMAL');
   const layout = useMemo(() => derivePresentationLayout(mode), [mode]);
   const { project, view } = data;
@@ -80,8 +91,15 @@ export function ProjectGanttView({ data = sampleProjectGantt }: ProjectGanttView
     ? { ...ui.presentationOverlay, fontSize: `${layout.fontScale}rem` }
     : {};
 
+  // 簡報模式下不啟用列跳轉（沉浸呈現，避免誤觸切換畫面）。
+  const rowSelect = presenting ? undefined : onSelectCase;
   const chart = (
-    <Chart data={data} rowHeightPx={layout.rowHeightPx} minHeightPx={layout.timelineMinHeightPx} />
+    <Chart
+      data={data}
+      rowHeightPx={layout.rowHeightPx}
+      minHeightPx={layout.timelineMinHeightPx}
+      onSelectCase={rowSelect}
+    />
   );
 
   const kpiPanel = (
@@ -135,9 +153,31 @@ export function ProjectGanttView({ data = sampleProjectGantt }: ProjectGanttView
             <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 6 }}>掛載流程</div>
             {view.rows.map((r) => {
               const meta = statusMeta(r.status);
+              const jumpable = rowJumpable(r, rowSelect);
+              const jump = jumpable ? () => rowSelect!(r.caseId as string) : undefined;
               return (
-                <div key={r.id} style={ui.listItem}>
-                  <div style={{ fontWeight: 500 }}>{r.name}</div>
+                <div
+                  key={r.id}
+                  style={{ ...ui.listItem, ...(jumpable ? { cursor: 'pointer' } : null) }}
+                  role={jumpable ? 'button' : undefined}
+                  tabIndex={jumpable ? 0 : undefined}
+                  onClick={jump}
+                  onKeyDown={
+                    jumpable
+                      ? (e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            jump!();
+                          }
+                        }
+                      : undefined
+                  }
+                  title={jumpable ? '點擊查看案件詳情' : undefined}
+                >
+                  <div style={{ fontWeight: 500, color: jumpable ? '#2563eb' : undefined }}>
+                    {r.name}
+                    {jumpable ? ' ↗' : ''}
+                  </div>
                   <div style={ui.muted}>
                     {r.planStart} ~ {r.planEnd}
                     <span style={{ ...ui.pill, background: meta.bg, color: meta.color }}>
@@ -155,6 +195,7 @@ export function ProjectGanttView({ data = sampleProjectGantt }: ProjectGanttView
           {layout.showSecondaryChrome && (
             <p style={{ ...ui.muted, marginTop: '0.75rem' }}>
               提示：點「進入簡報模式」或按 F／P 鍵可放大畫面供會議簡報，按 Esc 退出。簡報模式僅切換版面，不影響資料。
+              有「↗」標記的流程列可點擊查看對應案件詳情。
             </p>
           )}
         </div>
@@ -164,8 +205,13 @@ export function ProjectGanttView({ data = sampleProjectGantt }: ProjectGanttView
 }
 
 /** 甘特圖本體（月份刻度 + 流程長條 + 完成填色 + 今日線 + 排除日網底）。 */
-function Chart(props: { data: ProjectGanttData; rowHeightPx: number; minHeightPx: number }): JSX.Element {
-  const { data, rowHeightPx, minHeightPx } = props;
+function Chart(props: {
+  data: ProjectGanttData;
+  rowHeightPx: number;
+  minHeightPx: number;
+  onSelectCase?: (caseId: string) => void;
+}): JSX.Element {
+  const { data, rowHeightPx, minHeightPx, onSelectCase } = props;
   const { view } = data;
   const pct = (n: number): string => `${(n * 100).toFixed(2)}%`;
 
@@ -198,10 +244,29 @@ function Chart(props: { data: ProjectGanttData; rowHeightPx: number; minHeightPx
         {view.rows.map((r) => {
           const meta = statusMeta(r.status);
           const widthRatio = Math.max(r.endRatio - r.startRatio, 0.006);
+          const jumpable = rowJumpable(r, onSelectCase);
+          const jump = jumpable ? () => onSelectCase!(r.caseId as string) : undefined;
           return (
             <div key={r.id} style={{ ...ui.rowLine, height: rowHeightPx }}>
-              <div style={ui.rowLabel} title={r.name}>
+              <div
+                style={{ ...ui.rowLabel, ...(jumpable ? { cursor: 'pointer', color: '#2563eb' } : null) }}
+                title={jumpable ? `${r.name}（點擊查看案件詳情）` : r.name}
+                role={jumpable ? 'button' : undefined}
+                tabIndex={jumpable ? 0 : undefined}
+                onClick={jump}
+                onKeyDown={
+                  jumpable
+                    ? (e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          jump!();
+                        }
+                      }
+                    : undefined
+                }
+              >
                 {r.name}
+                {jumpable ? ' ↗' : ''}
               </div>
               <div style={ui.rowTrack}>
                 <div

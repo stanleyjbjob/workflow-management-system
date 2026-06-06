@@ -1,5 +1,11 @@
 export { ProjectGanttView } from './ProjectGanttView';
 export type { ProjectGanttViewProps } from './ProjectGanttView';
+export { ProjectWorkspace } from './ProjectWorkspace';
+export type { ProjectWorkspaceProps } from './ProjectWorkspace';
+export { CaseDetailPanel } from './CaseDetailPanel';
+export type { CaseDetailPanelProps } from './CaseDetailPanel';
 export { sampleProjectGantt } from './seed';
+export { sampleCases } from './seed-cases';
 export * from './types';
+export * from './cases';
 export * as presentation from './presentation';
