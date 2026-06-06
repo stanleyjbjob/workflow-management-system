@@ -65,15 +65,24 @@ describe('classifyDue', () => {
     expect(r.dueState).toBe('UPCOMING');
     expect(r.daysUntilDue).toBe(0);
   });
-  it('flags UPCOMING at the window boundary', () => {
+  it('flags UPCOMING at the calendar window boundary (no counter)', () => {
     const r = classifyDue(StepInstanceStatus.PENDING, new Date('2026-06-10T00:00:00Z'), NOW, 3);
     expect(r.dueState).toBe('UPCOMING');
     expect(r.daysUntilDue).toBe(3);
   });
-  it('returns NONE just beyond the window', () => {
+  it('returns NONE just beyond the calendar window', () => {
     const r = classifyDue(StepInstanceStatus.PENDING, new Date('2026-06-11T00:00:00Z'), NOW, 3);
     expect(r.dueState).toBe('NONE');
     expect(r.daysUntilDue).toBe(4);
+  });
+  it('uses workdaysUntil for the window when provided (calendar 4d but 1 workday => UPCOMING)', () => {
+    const r = classifyDue(StepInstanceStatus.PENDING, new Date('2026-06-11T00:00:00Z'), NOW, 3, 1);
+    expect(r.dueState).toBe('UPCOMING');
+    expect(r.daysUntilDue).toBe(4);
+  });
+  it('workdaysUntil beyond window => NONE even if few calendar days', () => {
+    const r = classifyDue(StepInstanceStatus.PENDING, new Date('2026-06-09T00:00:00Z'), NOW, 3, 5);
+    expect(r.dueState).toBe('NONE');
   });
 });
 
@@ -86,12 +95,14 @@ describe('columnOf', () => {
     expect(columnOf(StepInstanceStatus.PENDING, 'UPCOMING')).toBe('UPCOMING');
     expect(columnOf(StepInstanceStatus.IN_PROGRESS, 'UPCOMING')).toBe('UPCOMING');
   });
-  it('IN_PROGRESS not-upcoming to IN_PROGRESS', () => {
-    expect(columnOf(StepInstanceStatus.IN_PROGRESS, 'OVERDUE')).toBe('IN_PROGRESS');
+  it('active and OVERDUE to UPCOMING (overdue folded into the focus lane)', () => {
+    expect(columnOf(StepInstanceStatus.PENDING, 'OVERDUE')).toBe('UPCOMING');
+    expect(columnOf(StepInstanceStatus.IN_PROGRESS, 'OVERDUE')).toBe('UPCOMING');
+  });
+  it('IN_PROGRESS none to IN_PROGRESS', () => {
     expect(columnOf(StepInstanceStatus.IN_PROGRESS, 'NONE')).toBe('IN_PROGRESS');
   });
-  it('PENDING not-upcoming to TODO', () => {
-    expect(columnOf(StepInstanceStatus.PENDING, 'OVERDUE')).toBe('TODO');
+  it('PENDING none to TODO', () => {
     expect(columnOf(StepInstanceStatus.PENDING, 'NONE')).toBe('TODO');
   });
 });
@@ -166,9 +177,9 @@ describe('resolveTaskDeferral', () => {
 });
 
 describe('buildCard', () => {
-  it('normalizes fields and computes markers (overdue pending)', () => {
+  it('overdue pending now lands in UPCOMING column (overdue marker kept)', () => {
     const card = buildCard(task({ caseCode: 'SALES-1', caseTitle: 'A', flowType: 'SALES', responsibleRoleCode: 'SALES', assigneeId: 'u1', stepName: 'quote', stepOrder: 2, dueDate: new Date('2026-06-05T00:00:00Z') }), { now: NOW });
-    expect(card.column).toBe('TODO');
+    expect(card.column).toBe('UPCOMING');
     expect(card.overdue).toBe(true);
     expect(card.dueSoon).toBe(false);
     expect(card.daysUntilDue).toBe(-2);
@@ -181,12 +192,21 @@ describe('buildCard', () => {
     expect(card.column).toBe('UPCOMING');
     expect(card.dueSoon).toBe(true);
   });
+  it('workday window: far calendar but near workday => UPCOMING + dueSoon', () => {
+    const counter = () => 2;
+    const card = buildCard(task({ dueDate: '2026-06-15' }), { now: NOW, workdayCounter: counter });
+    expect(card.column).toBe('UPCOMING');
+    expect(card.dueSoon).toBe(true);
+    expect(card.workdaysUntilDue).toBe(2);
+    expect(card.daysUntilDue).toBe(8);
+  });
   it('completed card to DONE and inactive, no due markers', () => {
     const card = buildCard(task({ status: StepInstanceStatus.COMPLETED, dueDate: '2026-06-01' }), { now: NOW });
     expect(card.column).toBe('DONE');
     expect(card.isActive).toBe(false);
     expect(card.overdue).toBe(false);
     expect(card.dueSoon).toBe(false);
+    expect(card.workdaysUntilDue).toBe(null);
   });
   it('applies deferral via resolver', () => {
     const card = buildCard(task({ dueDate: '2026-06-13' }), { now: NOW, deferralResolver: () => ({ deferred: true, deferredDays: 2 }) });
@@ -230,17 +250,17 @@ describe('buildBoard', () => {
     task({ stepInstanceId: 's5', responsibleRoleCode: 'ENGINEER', flowType: 'ENVIRONMENT', status: StepInstanceStatus.RETURNED }),
     task({ stepInstanceId: 's6', responsibleRoleCode: 'ENGINEER', flowType: 'ENVIRONMENT', status: StepInstanceStatus.SKIPPED }),
   ];
-  it('places cards into the right columns and drops SKIPPED/RETURNED', () => {
+  it('overdue + upcoming both land in UPCOMING; drops SKIPPED/RETURNED', () => {
     const board = buildBoard(tasks, { options: { now: NOW } });
     expect(board.order).toEqual(KANBAN_COLUMN_ORDER);
-    expect(board.columns.TODO.map((c) => c.stepInstanceId)).toEqual(['s1']);
+    expect(board.columns.TODO.map((c) => c.stepInstanceId)).toEqual([]);
     expect(board.columns.IN_PROGRESS.map((c) => c.stepInstanceId)).toEqual(['s2']);
-    expect(board.columns.UPCOMING.map((c) => c.stepInstanceId)).toEqual(['s3']);
+    expect(board.columns.UPCOMING.map((c) => c.stepInstanceId)).toEqual(['s1', 's3']);
     expect(board.columns.DONE.map((c) => c.stepInstanceId)).toEqual(['s4']);
     expect(board.total).toBe(4);
     expect(board.activeTotal).toBe(3);
   });
-  it('computes KPI', () => {
+  it('computes KPI (upcoming and overdue counted separately)', () => {
     const board = buildBoard(tasks, { options: { now: NOW } });
     expect(board.kpi).toEqual({ pending: 3, upcoming: 1, overdue: 1, deferred: 0 });
   });
@@ -254,7 +274,7 @@ describe('buildBoard', () => {
   it('filters onlyMine by assignee', () => {
     const board = buildBoard(tasks, { filter: { onlyMine: true }, viewer: { userId: 'u1' }, options: { now: NOW } });
     expect(board.total).toBe(1);
-    expect(board.columns.TODO.map((c) => c.stepInstanceId)).toEqual(['s1']);
+    expect(board.columns.UPCOMING.map((c) => c.stepInstanceId)).toEqual(['s1']);
   });
   it('manager onlyMine sees all', () => {
     const board = buildBoard(tasks, { filter: { onlyMine: true }, viewer: { isManager: true }, options: { now: NOW } });
@@ -262,8 +282,8 @@ describe('buildBoard', () => {
   });
   it('sorts a column by due date ascending then stepOrder', () => {
     const local: KanbanTaskInput[] = [
-      task({ stepInstanceId: 'b', dueDate: '2026-06-05', stepOrder: 1 }),
-      task({ stepInstanceId: 'a', dueDate: '2026-06-01', stepOrder: 2 }),
+      task({ stepInstanceId: 'b', dueDate: '2026-09-05', stepOrder: 1 }),
+      task({ stepInstanceId: 'a', dueDate: '2026-09-01', stepOrder: 2 }),
       task({ stepInstanceId: 'c', dueDate: null, stepOrder: 0 }),
     ];
     const board = buildBoard(local, { options: { now: NOW } });
