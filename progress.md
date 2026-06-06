@@ -33,8 +33,8 @@
 | 5.1 | #23 專案 CRUD 與流程串接 | ✅ done | apps/api `projects/` 純引擎(輸入驗證/PRJ-YYYYMM-#### 代碼/專案狀態機/掛載視窗驗證允許先後與重疊/步驟完成比例+整體進度計算)、30 案測試(sandbox node 全綠 + tsc --strict、--noUnusedLocals 通過)；ProjectService(createProject/getProject/listProjects/updateProject/changeStatus/deleteProject/mountFlow/updateFlowWindow/unmountFlow/refreshFlowProgress/getProjectDetail 向下查看步驟與負責人)；app.module 註冊 ProjectsModule。沿用既有 Project/ProjectFlow/Exclusion schema 不新增 migration。REST/UI 屬後續 |
 | 5.2 | #24 甘特圖與進度呈現 | ✅ done | apps/api `projects/gantt-engine.ts` 純引擎(時間軸範圍/月份刻度/各流程長條+完成填色 fillRatio/今日基準線+inRange/§4.2 預期進度/§4.3 狀態 delta+容許門檻 T/排除日網底/KPI 整體進度·延遲·超前·排除日區間數)、**27 案測試**(sandbox node 全綠 + tsc --strict、--noUnusedLocals/Parameters 通過)；GanttService(getProjectGantt / getProjectGanttFresh 先回寫步驟比例再產生)；projects.module 註冊並 export GanttService。沿用既有 schema 不新增 migration。REST/UI 屬後續 |
 | 5.3 | #25 延遲／超前計算 | ✅ done | apps/api `projects/` delay-engine 純引擎(重用 5.2 expectedProgress/classifyFlowStatus 判五態 + 差異百分比→差異天數換算、日曆日/工作日基準可選、依流程型別覆寫容許門檻 T、完成/未開始差異天數歸零)、**22 案測試**(sandbox tsc --strict + node 全綠)；DelayService(getProjectDelays/getProjectDelaysFresh，WORKDAY 基準經 CalendarService.buildCalendar + businessDaysBetween 注入)；projects.module 註冊 DelayService(imports CalendarModule)。沿用既有 schema 不新增 migration。REST/UI 屬後續 |
-| 5.4 | #26 排除日 | 🔄 in-progress | 排除日 CRUD（ExclusionService: add/list/update/removeExclusion）+ 純引擎驗證（exclusion-engine: from<=to/reason 必填/source 限 CUSTOMER·INTERNAL/UTC 日界，含 isDateExcluded·exclusionCalendarDays）+ 時程避讓（deferDateAvoidingExclusions·rescheduleWithExclusions 委派 4.1 CalendarService，排除日與假日併行）；甘特圖網底沿用 5.2 gantt-engine 讀同一張 Exclusion 表。引擎斷言全綠 + tsc --strict typecheck 通過。**未完成**：§9-5（全專案 vs 特定流程）、§9-6（planEnd 自動順延規則）待釐清，本輪刻意未自動順延 planEnd；未於真實 monorepo 跑完整 pnpm jest |
-| 5.5~6.2 | #27-#30 | 待辦 | 依 WBS 順序 |
+| 5.4 | #26 專案行事曆排除日 | ✅ done | 排除日 CRUD（ExclusionService: add/list/update/removeExclusion）+ 純引擎驗證（exclusion-engine: from<=to/reason 必填/source 限 CUSTOMER·INTERNAL/UTC 日界，含 isDateExcluded·exclusionCalendarDays）+ 時程避讓（deferDateAvoidingExclusions·rescheduleWithExclusions 委派 4.1 CalendarService，排除日與假日併行）；甘特圖網底沿用 5.2 gantt-engine 讀同一張 Exclusion 表。**引擎+服務 spec 共 35 案於 sandbox(tsc --strict node16 + 自製 jest-runner) 全綠**；驗收要點達成（甘特即時呈現 by 5.2、時程避開 by CalendarService 委派）。§9-5（全專案 vs 特定流程）、§9-6（planEnd 自動順延規則）屬待釐清業務規則、非本 issue 驗收阻擋項，刻意未臆測 planEnd 自動順延，待人類定案後再開 follow-up |
+| 5.5~6.2 | #27-#30 | 待辦 | 依 WBS 順序（下一輪：#27 5.5 簡報模式） |
 
 ## 5.3 交付物（#25，延遲／超前計算，規格 §4.2–§4.4 / §5.1 狀態清單）
 - `apps/api/src/projects/delay-engine.ts`：延遲／超前**純邏輯**（無 DB/Nest/Prisma/CalendarService 相依，日界一律 UTC，與 5.2 同風格）。
@@ -144,6 +144,18 @@
   - `reminders.module.ts` / `index.ts`：`RemindersModule`(imports PrismaModule + CalendarModule)。
 - `apps/api/src/app.module.ts`：註冊 `RemindersModule`。
 
+## 5.4 交付物（#26，專案行事曆排除日，規格 §5.5 / §10.5 / §3.3 / §6.3）
+- `apps/api/src/projects/exclusion-engine.ts`：排除日**純邏輯**（無 DB/Nest/Prisma 相依，日界一律 UTC，與 2.x/3.x/4.x/5.1/5.2 同風格）。
+  - 驗證/正規化：`buildExclusionDraft`(fromDate/toDate 必填且合法、toDate≥fromDate 否則 `invalid_range`、reason 必填、source 限 CUSTOMER/INTERNAL 空值→null)、`buildExclusionPatch`(部分更新沿用現值、跨欄位仍驗證 from<=to)、`normalizeSource`、`toIsoDate`。日期一律正規化為 UTC 午夜。
+  - 純判斷：`isDateExcluded(date, ranges)`(含端點 UTC 日界，語意與 CalendarService.getProjectExclusionPredicate 一致)、`exclusionCalendarDays(range)`(含端點曆日計數，單日=1)。
+  - 錯誤：`ExclusionEngineError`(from_required/to_required/invalid_date/invalid_range/reason_required/invalid_source)。
+- `apps/api/src/projects/exclusion-engine.spec.ts` + `exclusion.service.spec.ts`：**共 35 案，於 sandbox(tsc --strict module=node16 + 自製 jest-compat runner) 全綠（PASS:35 FAIL:0）**；引擎+服務 tsc --strict 編譯零錯誤。涵蓋正規化(UTC 午夜)、必填/範圍/source 驗證、單日排除、區間含端點判斷、部分更新跨欄位驗證、NotFound/BadRequest(保留 code)、時程避讓委派 CalendarService(預設 NEXT_WORKDAY、可切 PUSH_FORWARD)。
+- `apps/api/src/projects/exclusion.service.ts`：`ExclusionService`(Prisma + CalendarService)：addExclusion / listExclusions(依 fromDate 升冪) / updateExclusion / removeExclusion；deferDateAvoidingExclusions / rescheduleWithExclusions 委派 4.1 CalendarService(讀同一張 Exclusion 表，排除日與假日併行)。引擎錯誤經 guard() 轉 BadRequestException(保留 code)。沿用既有 Exclusion schema，不新增 migration。
+- 甘特圖即時呈現：沿用 5.2 gantt-engine 之 `exclusions[]` 網底 + GanttService 讀同一張 Exclusion 表，新增/移除後即時反映，無需於本模組重複。
+- **決策（5.4）**：排除日 CRUD/驗證抽為 `exclusion-engine.ts`(純邏輯) + `ExclusionService`(獨立服務，注入 Prisma + CalendarService)，**不改動 project.service.ts**。**理由**：SRP、與 module「引擎+Service」風格一致，降低改動既有大型服務的風險。
+- **決策（5.4）**：時程避讓**委派 4.1 CalendarService**(deferToWorkday/reschedule，讀同一張 Exclusion 表)，排除日與國定假日**併行**套用(§7)；甘特網底沿用 5.2 gantt-engine。**理由**：避免重複實作曆法邏輯；單一資料來源(Exclusion 表)使 CRUD→避讓→甘特三者一致。
+- **決策（5.4）**：**刻意不自動順延 ProjectFlow.planEnd**——`rescheduleWithExclusions` 僅回傳重算結果不寫回。**理由**：§9-6(落入流程區間是否自動順延 planEnd)規格以「建議」表述、尚未定案，屬業務規則不臆測；待人類確認後再串接寫回。
+
 ## 技術決策（供 review）
 - **決策**：沿用 2.x/3.1/3.2「純引擎 + Service」風格，引擎不依賴 DB 可被純函式測試。**理由**：一致、可測。
 - **決策（3.3）**：environment-engine 與 onboarding 解耦（以結構型別 `EnvironmentHandoffLike` 接收移交藍圖）；服務層才呼叫 `OnboardingService.getEngineeringHandoff` 串接。**理由**：避免跨流程模組強耦合（與 3.2 對 sales 一致）。
@@ -173,9 +185,6 @@
 - **決策（5.2）**：時間軸範圍取 min(專案 planStart, 所有流程 planStart)..max(專案 planEnd, 所有流程 planEnd)，使超出專案計畫期間的流程(§3.2 允許重疊/先後)仍完整可見；今日線超出軸時夾擠並標 `inRange=false`。**理由**：避免長條被裁切；今日線位置正確為驗收要點。
 - **決策（5.2）**：延遲/超前狀態沿用規格 §4.2 線性預期 + §4.3 delta/容許門檻 T，T 先用引擎預設 8(§9-2 待定案，可由 GanttService 呼叫端覆寫)。**理由**：5.2 KPI 需「延遲數/超前數」，必須先有狀態判斷；完整的 5.3(天數換算、依流程型別不同門檻)留 #25。
 - **決策（5.2）**：排除日在甘特圖**僅作網底標示與 KPI 區間計數**，不在此順延 planEnd。**理由**：順延重算(串接 4.1 reschedule)屬 5.4 #26，避免越界改動流程計畫日。
-- **決策（5.4）**：排除日 CRUD/驗證抽為 `exclusion-engine.ts`(純邏輯) + `ExclusionService`(獨立服務，注入 Prisma + CalendarService)，**不改動 project.service.ts**。**理由**：SRP、與 module「引擎+Service」風格一致，降低改動既有大型服務的風險。
-- **決策（5.4）**：時程避讓**委派 4.1 CalendarService**(deferToWorkday/reschedule，讀同一張 Exclusion 表)，排除日與國定假日**併行**套用(§7)；甘特網底沿用 5.2 gantt-engine。**理由**：避免重複實作曆法邏輯；單一資料來源(Exclusion 表)使 CRUD→避讓→甘特三者一致。
-- **決策（5.4）**：**刻意不自動順延 ProjectFlow.planEnd**——`rescheduleWithExclusions` 僅回傳重算結果不寫回。**理由**：§9-6(落入流程區間是否自動順延 planEnd)規格以「建議」表述、尚未定案，屬業務規則不臆測；待人類確認後再串接寫回。
 
 ## 未完成 / Handoff（下一輪或人類接手）
 1. ✅（3.1）拜訪/會議紀錄 + 成案移交藍圖持久化落地（getHandoff 可取回）。
@@ -185,7 +194,7 @@
 5. ✅（3.4）客製化（需求變更）流程引擎 + 服務落地：需求變更單→指派鏈→開發/測試文件→複測（不通過退回循環）→測試區→正式區兩道關卡→COMPLETED。
 6. ✅（4.1）曆法遞延引擎 + CalendarService 已落地：可產生 `isExcluded` predicate 注入 onboarding/environment `buildSchedule`、支援兩種遞延模式重算、整合專案排除日(§10.5)。**仍待整合**：將 onboarding/environment service 實際呼叫 `CalendarService.buildIsExcluded()` 注入 buildSchedule(目前仍為預設 identity，未串接)；持久化假日來源(Holiday 表 / 政府行事曆匯入，§12-5)；遞延模式政策定案(目前預設 NEXT_WORKDAY)。
 7. ✅（4.2）提醒與通知引擎 + ReminderService 已落地：多時點提醒、提醒日隨到期日遞延同步、可插拔多管道(本輪僅 IN_APP 落地)、跨輪去重。**仍待**：(a) Email/其他管道 dispatcher 接外部服務並 `registerDispatcher`(§12-7)；(b) **定時觸發**——目前 `dispatchDueReminders(caseId, {now})` 為被呼叫式，尚未接排程器(cron/任務佇列)定期掃描全案件派送；(c) 提醒規則(時點密度)是否需可由流程設計器設定；(d) StepInstance.dueDate 來源——需與 5.x 專案管理/流程推進實際把 dueDate 寫入 StepInstance 後，提醒才有資料。
-8. ✅（5.1）專案 CRUD 與流程串接引擎 + ProjectService 已落地。✅（5.2）甘特圖呈現引擎 + GanttService 已落地：軸/月份刻度/長條+完成填色/今日基準線+inRange/§4.2 預期進度/§4.3 狀態與 delta/排除日網底/KPI(整體進度·延遲·超前·排除日區間數)；getProjectGanttFresh 先回寫步驟比例再產生。✅（5.3）延遲/超前計算引擎 + DelayService 已落地(#25：天數換算、依流程型別容許門檻 T、可選日曆日/工作日基準均完成)。**仍待**：(b) **5.4 排除日**(#26)：本輪已落地排除日 CRUD（ExclusionService）+ exclusion-engine 驗證 + 時程單點避讓/重算（委派 CalendarService）；**仍待**——§9-6 確認後將「排除日落入流程區間自動順延 ProjectFlow.planEnd」串接（目前 reschedule 僅回傳結果不寫回 planEnd）、§9-5 是否區分全專案/特定流程（現 Exclusion 僅 projectId）、跑完整 pnpm jest；(c) **5.5 簡報模式**(#27)、**5.6 案件↔專案雙向導覽**(#28：gantt rows 已透傳 caseId、getProjectDetail 已回傳步驟，UI 跳轉待補)；(d) 進度認定方式 §9-1 定案(目前預設步驟比例)。
+8. ✅（5.1）專案 CRUD 與流程串接引擎 + ProjectService 已落地。✅（5.2）甘特圖呈現引擎 + GanttService 已落地。✅（5.3）延遲/超前計算引擎 + DelayService 已落地(#25)。✅（5.4）排除日 CRUD（ExclusionService）+ exclusion-engine 驗證 + 時程避讓（委派 CalendarService）已落地並驗證（引擎+服務 35 案於 sandbox 全綠 + tsc --strict 通過；驗收要點達成，#26 標 done）。**仍待**：(b) §9-6 確認後將「排除日落入流程區間自動順延 ProjectFlow.planEnd」串接（目前 reschedule 僅回傳結果不寫回 planEnd）、§9-5 是否區分全專案/特定流程（現 Exclusion 僅 projectId）、於真實 monorepo 跑完整 pnpm jest；(c) **5.5 簡報模式**(#27)、**5.6 案件↔專案雙向導覽**(#28：gantt rows 已透傳 caseId、getProjectDetail 已回傳步驟，UI 跳轉待補)；(d) 進度認定方式 §9-1 定案(目前預設步驟比例)。
 9. **REST controller / 前端 UI**：sales / onboarding / environment / customization / calendar / reminders / **projects(含甘特圖、延遲清單、排除日管理)** 皆尚未提供（屬後續 API 層任務；reminders 另需「通知中心」前端與已讀互動；projects 需專案管理主畫面、甘特圖繪製與簡報模式）。
 10. **服務層整合測試**：sales/onboarding/environment/customization/reminders/projects/gantt/delay/exclusion service 目前僅引擎層純函式測試覆蓋；DB 行為待後續以整合測試補強。
 
@@ -198,5 +207,5 @@
 - §12-7 提醒管道（系統內/Email/其他）→ **4.2 已以可插拔 dispatcher 抽象並落地 IN_APP，Email/其他待主管確認管道與外部服務後 registerDispatcher 注入**；另定時觸發機制(cron/任務佇列)待規劃。
 - §12-10 附件/範本實體儲存於系統或改以 SharePoint/OneDrive 連結為主、允許檔案類型與大小上限 → 影響 2.4/2.5 上傳實作，待主管確認。
 - 專案管理模組規格 §9-1 進度認定方式（步驟比例/加權工時/人工填報）→ **5.1 先以步驟完成比例為預設並保留 progress 可人工覆寫，待主管定案**。
-- 專案管理模組規格 §9-2/§9-3/§9-6 容許門檻 T、預期進度日曆日或工作日基準、排除日順延規則 → 影響 5.2/5.3/5.4：**5.2 甘特圖已用 §4.2 線性預期 + §4.3 預設 T=8 呈現狀態；5.3 延遲/超前已實作天數換算、依流程型別覆寫 T、CALENDAR/WORKDAY 基準可選(預設值待主管定案)；5.4 排除日 CRUD/時程避讓已落地**；排除日順延 planEnd 待 #26 與主管定案(§9-6)。
+- 專案管理模組規格 §9-2/§9-3/§9-6 容許門檻 T、預期進度日曆日或工作日基準、排除日順延規則 → 影響 5.2/5.3/5.4：**5.2 甘特圖已用 §4.2 線性預期 + §4.3 預設 T=8 呈現狀態；5.3 延遲/超前已實作天數換算、依流程型別覆寫 T、CALENDAR/WORKDAY 基準可選(預設值待主管定案)；5.4 排除日 CRUD/時程避讓已落地並驗證**；排除日順延 planEnd 待主管定案(§9-6)後再串接。
 - 專案管理模組規格 §9-5 排除日是否區分「全專案」與「特定流程」→ 目前 Exclusion 僅 projectId(全專案)，5.4 未臆測；待主管定案後決定是否加 flowId 維度。
