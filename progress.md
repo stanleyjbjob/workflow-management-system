@@ -28,9 +28,27 @@
 | 3.2 | #18 系統導入流程 | ✅ done | apps/api `onboarding/` 純引擎 + OnboardingService、26 項 jest 單元測試；handoffToEngineering 建立 ENVIRONMENT 案件。REST/UI 屬後續 |
 | 3.3 | #19 環境建置流程 | ✅ done | apps/api `environment/` 純引擎(依銷售模式分支買斷/訂閱、接收導入移交、主機採購等待狀態、表單齊備+環境驗收把關、接收藍圖序列化)、55 項測試(sandbox 全綠 + tsc --strict 通過)；EnvironmentService(receiveFromOnboarding/recordHostProcurement+等待狀態 ON_HOLD/getHostReadiness/submitEnvironmentForm/getFormStatuses/completeEnvironment→COMPLETED)；app.module 註冊 EnvironmentModule。REST/UI 屬後續 |
 | 3.4 | #20 客製化（需求變更）流程 | ✅ done | apps/api `customization/` 純引擎(指派鏈把關/狀態機/複測退回循環/測試區→正式區兩道關卡/需求變更單序列化)、40 項測試(sandbox 全綠 + tsc --strict 通過)；CustomizationService(raiseChangeRequest/assignEngLead/assignEngineer/submitForm/submitForRetest/recordRetest/confirmTestDeploy/confirmProdDeploy + append-only 狀態事件持久化)；app.module 註冊 CustomizationModule。REST/UI 屬後續 |
-| 4.1 | #21 行事曆判斷：假日/連假遞延 | ✅ done | apps/api `calendar/` 純引擎(假日/週末/補班判斷、遞延、工作日運算、兩種遞延模式重算)+CalendarService(專案排除日 §10.5)、45 項斷言全綠 + tsc --strict 通過(引擎/spec/service) |
+| 4.1 | #21 行事曆判斷：假日/連假遞延 | ✅ done | apps/api `calendar/` 純引擎(假日/週末/補班判斷、遞延、工作日運算、兩種遞延模式重算)+CalendarService(專案排除日 §10.5)、45 項斷言全綠 + tsc --strict 通過 |
 | 4.2 | #22 提醒與通知 | ✅ done | apps/api `reminders/` 純引擎(提前/到期/逾期多時點、提醒日由「已遞延到期日」推導故遞延同步調整、多管道 IN_APP/EMAIL/OTHER 可插拔 dispatcher、跨輪去重、派送日誌序列化)、21 案/53 斷言全綠 + tsc --strict 通過；ReminderService(由 StepInstance 組對象→行事曆遞延→挑應派送→IN_APP 落地 NOTIFICATION_INBOX + 去重日誌 NOTIFICATION_DISPATCH_LOG)；app.module 註冊 RemindersModule。REST/UI 與 Email/其他管道 dispatcher 屬後續 |
-| 5.1~6.x | #23-#30 | 待辦 | 依 WBS 順序 |
+| 5.1 | #23 專案 CRUD 與流程串接 | ✅ done | apps/api `projects/` 純引擎(輸入驗證/PRJ-YYYYMM-#### 代碼/專案狀態機/掛載視窗驗證允許先後與重疊/步驟完成比例+整體進度計算)、30 案測試(sandbox node 全綠 + tsc --strict、--noUnusedLocals 通過)；ProjectService(createProject/getProject/listProjects/updateProject/changeStatus/deleteProject/mountFlow/updateFlowWindow/unmountFlow/refreshFlowProgress/getProjectDetail 向下查看步驟與負責人)；app.module 註冊 ProjectsModule。沿用既有 Project/ProjectFlow/Exclusion schema 不新增 migration。REST/UI 屬後續 |
+| 5.2~6.x | #24-#30 | 待辦 | 依 WBS 順序 |
+
+## 5.1 交付物（#23，專案 CRUD 與流程串接，§3/§5.1/§6.1）
+- `apps/api/src/projects/`：後端「專案管理」模組（對應專案管理模組規格 §3、§5.1、§6.1）。
+  - `project-engine.ts`：**純邏輯**（無 DB/Nest 相依，日界一律 UTC，與 2.x/3.x/4.x 同風格）。
+    - 專案代碼：`generateProjectCode({now,sequence})`→`PRJ-YYYYMM-####`（序號補零 4 位；sequence 非正整數拋 `invalid_sequence`）。
+    - 輸入驗證：`buildProjectDraft`（建立用，name/client/ownerId 必填且去頭尾空白、planStart/planEnd 合法、planEnd≥planStart 否則 `invalid_plan_window`）、`buildProjectPatch`（部分更新，僅驗證提供欄位、跨現值檢查視窗）。
+    - 專案狀態機（規格 §3.1）：`PROJECT_TRANSITIONS`（ACTIVE↔ON_HOLD、皆可→COMPLETED/CANCELLED；COMPLETED/CANCELLED 終態）、`canTransitionStatus`（同態冪等視為合法）、`assertStatusTransition`（非法拋 `invalid_status_transition`）。
+    - 掛載流程：`buildFlowMount(input, caseFallback?)`（flowType/name 必填或由案件帶出、視窗驗證、`normalizeProgress` 夾擠 0..100；**允許先後與重疊故不做重疊阻擋**，規格 §3.2 備註）、`flowsOverlap`（僅供 UI 標示）。
+    - 進度認定（規格 §4.1 預設「步驟完成比例」）：`computeStepCompletionProgress`（完成數÷計入步驟，排除 SKIPPED）、`averageProgress`（各流程平均，供 §5.1 KPI 整體進度）。
+  - `project-engine.spec.ts`：jest 單元測試 **30 案**（sandbox node 跑全綠；tsc --strict + --noUnusedLocals/--noUnusedParameters 通過）。
+  - `project.service.ts`：`ProjectService`（Prisma）：
+    - CRUD：`createProject`（產生未碰撞代碼：該月件數+序號、碰撞遞增重試）、`getProject`/`listProjects`（含 flows/exclusions/owner）、`updateProject`、`changeStatus`（狀態機把關）、`deleteProject`（schema onDelete:Cascade 連帶刪 flows/exclusions）。
+    - 流程串接：`mountFlow`（caseId 存在性驗證；可由案件帶出 flowType/title；指定 flowType 與案件不符回 `flow_type_mismatch`）、`updateFlowWindow`、`unmountFlow`（僅解除掛載不刪案件）。
+    - 進度與向下查看：`refreshFlowProgress`（依案件 StepInstance 完成比例回寫 ProjectFlow.progress；無 case 保留人工值）、`getProjectDetail`（每個流程展開其案件步驟清單：order/步驟名稱/負責角色/負責人，含 overallProgress）。
+    - 引擎錯誤經 `guard()` 轉 `BadRequestException`（保留 code 供前端判讀）。
+  - `projects.module.ts` / `index.ts`：`ProjectsModule`（imports PrismaModule）。
+- `apps/api/src/app.module.ts`：註冊 `ProjectsModule`。
 
 ## 3.3 交付物（#19，環境建置流程，§6）
 - `apps/api/src/environment/`：後端「環境建置流程」模組（對應需求規格 §6）。
@@ -116,19 +134,25 @@
 - **決策（4.2）**：提醒規則以「到期前 3/1 工作日 + 到期當日 + 逾期 1 工作日」為**預設**，可由 ReminderPolicy 覆寫；offset 可選工作日或曆日。**理由**：§8.3 未明定提醒時點密度，先給合理可用預設並保留部門自訂。
 - **決策（4.2）**：派送去重以 append-only `NOTIFICATION_DISPATCH_LOG`(FormSubmission) 記 dedupKey，跨輪以 getSentDedupKeys 過濾；系統內通知落 `NOTIFICATION_INBOX`。**理由**：沿用既有「不新增 migration、FormSubmission 落地」風格(如 3.4 狀態事件)。
 - **決策（4.2）**：reminder-engine 與 onboarding/StepInstance 解耦(以結構型別 `ScheduledLike` / `ReminderTarget` 接收)，由服務層才接 Prisma StepInstance 與 CalendarService。**理由**：與 3.2/3.3 跨模組解耦一致，引擎可純函式測試。
+- **決策（5.1）**：專案進度認定先以「步驟完成比例」(規格 §4.1 預設建議)實作 `computeStepCompletionProgress`(排除 SKIPPED)，progress 欄位仍可人工覆寫。**理由**：§9-1(步驟比例/加權工時/人工填報)未定案，先給可用預設並保留覆寫，待主管確認。
+- **決策（5.1）**：掛載流程**不阻擋時間重疊**(僅 `flowsOverlap` 供 UI 標示)。**理由**：規格 §3.2 備註明示流程間可先後與重疊(如導入未結束即開始環境建置)。
+- **決策（5.1）**：專案代碼採 `PRJ-YYYYMM-####`，服務層以「該月件數+序號」產生並對 `code @unique` 碰撞遞增重試(極端退路加時間戳尾碼)。**理由**：可讀、按月可辨識，避免依賴外部序列；唯一性由 schema 把關。
+- **決策（5.1）**：專案狀態機與既有 `ProjectStatus`(ACTIVE/COMPLETED/ON_HOLD/CANCELLED)對齊，COMPLETED/CANCELLED 設為終態、同態轉移冪等合法。**理由**：對應規格 §3.1，避免誤從終態復活；冪等讓重送同狀態不報錯。
+- **決策（5.1）**：服務層只做專案/掛載 CRUD 與向下查看(getProjectDetail 展開案件步驟與負責人)；甘特圖(5.2)、延遲/超前(5.3)、排除日順延(5.4)、簡報(5.5)、雙向導覽 UI(5.6)留後續 issue。**理由**：小步前進，符合 issue 5.1 驗收範圍。
 
 ## 未完成 / Handoff（下一輪或人類接手）
 1. ✅（3.1）拜訪/會議紀錄 + 成案移交藍圖持久化落地（getHandoff 可取回）。
 2. ✅（3.2）系統導入流程引擎 + 服務落地：接收銷售移交、預定義時間點/提醒、委任權限表簽核把關、**移交工程建立 ENVIRONMENT 案件**。
 3. ✅（3.3）環境建置流程引擎 + 服務落地：依銷售模式分支、接收導入移交、主機採購等待狀態、環境驗收把關→COMPLETED。
-4. **CI 全流程驗證**：3.3/3.4/4.1/4.2 引擎 + spec 已於 sandbox 驗證(tsc --strict + node 測試全綠)；各 `*.service.ts` 以 stub(PrismaService/CalendarService/@nestjs/common/@prisma/client) 通過 strict typecheck，惟未在真實 monorepo 跑 `pnpm -r build`(需 generated Prisma client)。下輪/人類 review 時請確認 CI build 綠。
+4. **CI 全流程驗證**：3.3/3.4/4.1/4.2/5.1 引擎 + spec 已於 sandbox 驗證(tsc --strict + node 測試全綠)；各 `*.service.ts`（含 projects）以 stub(PrismaService/@nestjs/common/@prisma/client) 通過 strict typecheck（5.1 另過 --noUnusedLocals/--noUnusedParameters），惟未在真實 monorepo 跑 `pnpm -r build`(需 generated Prisma client)。下輪/人類 review 時請確認 CI build 綠。
 5. ✅（3.4）客製化（需求變更）流程引擎 + 服務落地：需求變更單→指派鏈→開發/測試文件→複測（不通過退回循環）→測試區→正式區兩道關卡→COMPLETED。
 6. ✅（4.1）曆法遞延引擎 + CalendarService 已落地：可產生 `isExcluded` predicate 注入 onboarding/environment `buildSchedule`、支援兩種遞延模式重算、整合專案排除日(§10.5)。**仍待整合**：將 onboarding/environment service 實際呼叫 `CalendarService.buildIsExcluded()` 注入 buildSchedule(目前仍為預設 identity，未串接)；持久化假日來源(Holiday 表 / 政府行事曆匯入，§12-5)；遞延模式政策定案(目前預設 NEXT_WORKDAY)。
 7. ✅（4.2）提醒與通知引擎 + ReminderService 已落地：多時點提醒、提醒日隨到期日遞延同步、可插拔多管道(本輪僅 IN_APP 落地)、跨輪去重。**仍待**：(a) Email/其他管道 dispatcher 接外部服務並 `registerDispatcher`(§12-7)；(b) **定時觸發**——目前 `dispatchDueReminders(caseId, {now})` 為被呼叫式，尚未接排程器(cron/任務佇列)定期掃描全案件派送；(c) 提醒規則(時點密度)是否需可由流程設計器設定；(d) StepInstance.dueDate 來源——需與 5.x 專案管理/流程推進實際把 dueDate 寫入 StepInstance 後，提醒才有資料。
-8. **REST controller / 前端 UI**：sales / onboarding / environment / customization / calendar / reminders 皆尚未提供（屬後續 API 層任務；reminders 另需「通知中心」前端與已讀互動）。
-9. **服務層整合測試**：sales/onboarding/environment/customization/reminders service 目前僅引擎層純函式測試覆蓋；DB 行為待後續以整合測試補強。
+8. ✅（5.1）專案 CRUD 與流程串接引擎 + ProjectService 已落地：專案 CRUD、案件掛載(允許先後/重疊)、refreshFlowProgress 依步驟比例回寫、getProjectDetail 向下查看步驟與負責人。**仍待**：(a) **5.2 甘特圖**(今日基準線、排除日標示、完成比例填色)；(b) **5.3 延遲/超前**(expected/actual delta、容許門檻 T、可選工作日基準扣假日)；(c) **5.4 排除日 CRUD 與順延重算**(串接 4.1 calendar `reschedule`/`buildIsExcluded`)；(d) **5.5 簡報模式**、**5.6 案件↔專案雙向導覽**(getProjectDetail 已回傳 caseId/步驟，UI 跳轉待補)；(e) 進度認定方式 §9-1 定案(目前預設步驟比例)。
+9. **REST controller / 前端 UI**：sales / onboarding / environment / customization / calendar / reminders / **projects** 皆尚未提供（屬後續 API 層任務；reminders 另需「通知中心」前端與已讀互動；projects 需專案管理主畫面與甘特圖）。
+10. **服務層整合測試**：sales/onboarding/environment/customization/reminders/projects service 目前僅引擎層純函式測試覆蓋；DB 行為待後續以整合測試補強。
 
-## 待釐清（沿用，需求 §12）
+## 待釐清（沿用，需求 §12 / 專案管理模組規格 §9）
 - §12-1 跨角色移交是否需主管核可、流程一律由特定角色發起 → 設計器已留「觸發角色＋條件」欄位，實際核可關卡待釐清（3.4 指派鏈已留 roleMatches 回報、未強制）。
 - §12-2 失敗原因分類項目（供改善分析報表）→ 影響 3.1 失敗分類 Enum 收斂，目前以可擴充字串承載。
 - §12-3 各表單實際欄位（報價單/客製需求/委任權限表/人員資料表/環境建置檢核表等）→ 目前僅以 code 標識容器、data 承載 JSON。
@@ -136,3 +160,5 @@
 - §12-5 行事曆遞延規則（順延下一工作日/整體後推）→ **4.1 已實作兩種模式(DeferralMode)並預設 NEXT_WORKDAY，待主管定案選用**；假日持久化來源(Holiday 表/政府行事曆)亦待確認。
 - §12-7 提醒管道（系統內/Email/其他）→ **4.2 已以可插拔 dispatcher 抽象並落地 IN_APP，Email/其他待主管確認管道與外部服務後 registerDispatcher 注入**；另定時觸發機制(cron/任務佇列)待規劃。
 - §12-10 附件/範本實體儲存於系統或改以 SharePoint/OneDrive 連結為主、允許檔案類型與大小上限 → 影響 2.4/2.5 上傳實作，待主管確認。
+- 專案管理模組規格 §9-1 進度認定方式（步驟比例/加權工時/人工填報）→ **5.1 先以步驟完成比例為預設並保留 progress 可人工覆寫，待主管定案**。
+- 專案管理模組規格 §9-2/§9-3/§9-6 容許門檻 T、預期進度日曆日或工作日基準、排除日順延規則 → 影響 5.3/5.4，待主管確認（5.3/5.4 尚未實作）。
