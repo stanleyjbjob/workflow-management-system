@@ -30,3 +30,42 @@ jobs:
 
       - name: Test
         run: pnpm -r test
+
+  # 7.1：首批正式持久化資料（Holiday 表）後，驗證 migration 能在乾淨 DB 套用且 seed 可建立範例假日。
+  # 獨立於 build-test，避免 DB 服務影響純編譯 / 單元測試流程。
+  migration-check:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: wfms
+          POSTGRES_PASSWORD: wfms
+          POSTGRES_DB: wfms
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U wfms"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://wfms:wfms@localhost:5432/wfms?schema=public
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile=false
+
+      # postinstall 已執行 prisma generate；此處對乾淨 DB 套用所有 migration。
+      - name: Apply migrations (prisma migrate deploy)
+        run: pnpm --filter @wfms/api exec prisma migrate deploy
+
+      - name: Seed example data
+        run: pnpm --filter @wfms/api run db:seed
