@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { AttachmentsModule } from './attachments/attachments.module';
 import { AuthModule } from './auth/auth.module';
 import { FormsModule } from './forms/forms.module';
 import { HealthController } from './health/health.controller';
@@ -15,6 +16,7 @@ import { WorkflowModule } from './workflow/workflow.module';
     WorkflowModule,
     FormsModule,
     TemplatesModule,
+    AttachmentsModule,
   ],
   controllers: [HealthController],
 })
