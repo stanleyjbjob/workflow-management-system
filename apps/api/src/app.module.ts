@@ -6,6 +6,7 @@ import { CustomizationModule } from './customization/customization.module';
 import { EnvironmentModule } from './environment/environment.module';
 import { FormsModule } from './forms/forms.module';
 import { HealthController } from './health/health.controller';
+import { KanbanModule } from './kanban/kanban.module';
 import { OnboardingModule } from './onboarding/onboarding.module';
 import { PrismaModule } from './prisma/prisma.module';
 import { ProjectsModule } from './projects/projects.module';
@@ -31,6 +32,7 @@ import { WorkflowModule } from './workflow/workflow.module';
     CalendarModule,
     RemindersModule,
     ProjectsModule,
+    KanbanModule,
   ],
   controllers: [HealthController],
 })
