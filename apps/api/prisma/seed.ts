@@ -2,10 +2,10 @@
  * 種子資料 — 供開發 / 測試使用。
  * 以 upsert 撰寫，可重複執行（idempotent）。
  * 內容涵蓋：6 個角色、各角色示範使用者、一條完整「銷售流程」定義
- * （含步驟、表單、步驟-表單關聯、作業範本檔），以及一個示範專案
- * （含流程掛載與行事曆排除日）。
+ * （含步驟、表單、步驟-表單關聯、作業範本檔）、一個示範專案
+ * （含流程掛載與行事曆排除日），以及示範假日 / 補班（Holiday 表，7.1）。
  */
-import { PrismaClient, RoleCode, FlowType, FieldType } from '@prisma/client';
+import { PrismaClient, RoleCode, FlowType, FieldType, HolidayType, HolidaySource } from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -229,11 +229,54 @@ async function seedProject(managerId: string) {
   return project.id;
 }
 
+/**
+ * 示範假日 / 補班（Holiday 表，7.1）。idempotent：以 date 唯一鍵 upsert。
+ * ⚠️ 農曆假日（春節 / 端午 / 中秋）與彈性放假 / 補班日，每年由政府公告且多為農曆換算，
+ * 以下日期僅為「示範資料」，正式請由主管於系統維護校正（§8.3、§12-5）。
+ */
+async function seedHolidays() {
+  const holidays: { date: string; name: string; type?: HolidayType; source?: HolidaySource }[] = [
+    { date: '2026-01-01', name: '中華民國開國紀念日（元旦）' },
+    { date: '2026-02-14', name: '春節彈性放假補班', type: HolidayType.MAKEUP_WORKDAY },
+    { date: '2026-02-16', name: '春節（除夕）' },
+    { date: '2026-02-17', name: '春節' },
+    { date: '2026-02-18', name: '春節' },
+    { date: '2026-02-19', name: '春節' },
+    { date: '2026-02-20', name: '春節' },
+    { date: '2026-02-28', name: '和平紀念日' },
+    { date: '2026-04-04', name: '兒童節' },
+    { date: '2026-04-06', name: '清明節（彈性放假補假）' },
+    { date: '2026-05-01', name: '勞動節' },
+    { date: '2026-06-19', name: '端午節' },
+    { date: '2026-09-25', name: '中秋節' },
+    { date: '2026-10-03', name: '國慶彈性放假補班', type: HolidayType.MAKEUP_WORKDAY },
+    { date: '2026-10-09', name: '國慶日（彈性放假）' },
+    { date: '2026-10-10', name: '國慶日' },
+  ];
+  for (const h of holidays) {
+    await prisma.holiday.upsert({
+      where: { date: new Date(h.date) },
+      update: {
+        name: h.name,
+        type: h.type ?? HolidayType.HOLIDAY,
+        source: h.source ?? HolidaySource.GOVERNMENT,
+      },
+      create: {
+        date: new Date(h.date),
+        name: h.name,
+        type: h.type ?? HolidayType.HOLIDAY,
+        source: h.source ?? HolidaySource.GOVERNMENT,
+      },
+    });
+  }
+}
+
 async function main() {
   const roleIds = await seedRoles();
   const userIds = await seedUsers(roleIds);
   await seedSalesWorkflow(roleIds, userIds[RoleCode.MANAGER]);
   await seedProject(userIds[RoleCode.MANAGER]);
+  await seedHolidays();
   console.log('✅ 種子資料載入完成');
 }
 
