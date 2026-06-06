@@ -180,6 +180,11 @@ export function latestVersionByName(
   return out;
 }
 
+/** 以 Unicode code point 穩定比較字串（不受執行環境 locale 影響）。 */
+function compareByCodePoint(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 /**
  * 列出某步驟「目前可下載」的範本清單（每個名稱只取最新版），依名稱排序。
  * 供案件承辦於步驟中下載最新作業範本。
@@ -188,7 +193,7 @@ export function latestTemplates(
   templates: readonly EngineStepTemplate[],
 ): EngineStepTemplate[] {
   return [...latestVersionByName(templates).values()].sort((a, b) =>
-    trimStr(a.name).localeCompare(trimStr(b.name)),
+    compareByCodePoint(trimStr(a.name), trimStr(b.name)),
   );
 }
 
@@ -248,5 +253,5 @@ export function distinctTemplateNames(
 ): string[] {
   const set = new Set<string>();
   for (const t of templates) set.add(trimStr(t.name));
-  return [...set].sort((a, b) => a.localeCompare(b));
+  return [...set].sort(compareByCodePoint);
 }
