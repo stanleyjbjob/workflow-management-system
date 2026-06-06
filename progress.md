@@ -31,7 +31,20 @@
 | 4.1 | #21 行事曆判斷：假日/連假遞延 | ✅ done | apps/api `calendar/` 純引擎(假日/週末/補班判斷、遞延、工作日運算、兩種遞延模式重算)+CalendarService(專案排除日 §10.5)、45 項斷言全綠 + tsc --strict 通過 |
 | 4.2 | #22 提醒與通知 | ✅ done | apps/api `reminders/` 純引擎(提前/到期/逾期多時點、提醒日由「已遞延到期日」推導故遞延同步調整、多管道 IN_APP/EMAIL/OTHER 可插拔 dispatcher、跨輪去重、派送日誌序列化)、21 案/53 斷言全綠 + tsc --strict 通過；ReminderService(由 StepInstance 組對象→行事曆遞延→挑應派送→IN_APP 落地 NOTIFICATION_INBOX + 去重日誌 NOTIFICATION_DISPATCH_LOG)；app.module 註冊 RemindersModule。REST/UI 與 Email/其他管道 dispatcher 屬後續 |
 | 5.1 | #23 專案 CRUD 與流程串接 | ✅ done | apps/api `projects/` 純引擎(輸入驗證/PRJ-YYYYMM-#### 代碼/專案狀態機/掛載視窗驗證允許先後與重疊/步驟完成比例+整體進度計算)、30 案測試(sandbox node 全綠 + tsc --strict、--noUnusedLocals 通過)；ProjectService(createProject/getProject/listProjects/updateProject/changeStatus/deleteProject/mountFlow/updateFlowWindow/unmountFlow/refreshFlowProgress/getProjectDetail 向下查看步驟與負責人)；app.module 註冊 ProjectsModule。沿用既有 Project/ProjectFlow/Exclusion schema 不新增 migration。REST/UI 屬後續 |
-| 5.2~6.x | #24-#30 | 待辦 | 依 WBS 順序 |
+| 5.2 | #24 甘特圖與進度呈現 | ✅ done | apps/api `projects/gantt-engine.ts` 純引擎(時間軸範圍/月份刻度/各流程長條+完成填色 fillRatio/今日基準線+inRange/§4.2 預期進度/§4.3 狀態 delta+容許門檻 T/排除日網底/KPI 整體進度·延遲·超前·排除日區間數)、**27 案測試**(sandbox node 全綠 + tsc --strict、--noUnusedLocals/Parameters 通過)；GanttService(getProjectGantt / getProjectGanttFresh 先回寫步驟比例再產生)；projects.module 註冊並 export GanttService。沿用既有 schema 不新增 migration。REST/UI 屬後續 |
+| 5.3~6.x | #25-#30 | 待辦 | 依 WBS 順序 |
+
+## 5.2 交付物（#24，甘特圖與進度呈現，規格 §5.2 / §5.1 KPI / §10.3）
+- `apps/api/src/projects/gantt-engine.ts`：甘特圖**純邏輯**（無 DB/Nest/Prisma 相依，日界一律 UTC，與 2.x/3.x/4.x/5.1 同風格）。
+  - 幾何工具：`toIsoDate`(UTC YYYY-MM-DD)、`ratioOf(date, axisStart, axisEnd)`(某日於軸上 0..1 位置，含端點，零跨距時 date<start→0 否則 1)。
+  - 時間軸：軸範圍 = min(專案 planStart, 所有流程 planStart) .. max(專案 planEnd, 所有流程 planEnd)，確保長條與今日線落在軸內；`buildMonthTicks`(每月第一天 UTC 的月份刻度，守門 1200 月)；`totalDaysInclusive`(含端點天數，至少 1)。
+  - 預期進度（§4.2）：`expectedProgress(planStart, planEnd, now)`→線性 clamp 0..100(未開始 0／結束後 100／零工期 now>=end→100)。
+  - 狀態分類（§4.3）：`classifyFlowStatus`→`{status, delta}`，優先序 progress>=100→COMPLETED、now<planStart→NOT_STARTED、否則 delta=實際−預期 與容許門檻 T 判 DELAYED/AHEAD/ON_TIME(±T 含端點)。`DEFAULT_TOLERANCE_THRESHOLD=8`(§9-2 待主管定案)。
+  - 主函式 `buildGantt(params)`→`GanttView`：`axis`(start/end/totalDays/months[])、`today`(date/ratio/inRange，超出軸範圍夾擠且 inRange=false)、`rows[]`(每流程 startRatio/endRatio/progress/fillRatio=progress÷100/expected/delta/status，透傳 caseId/flowType 供 5.6 雙向導覽)、`exclusions[]`(每排除日 startRatio/endRatio 網底 + reason/source)、`kpis`(overallProgress 各流程平均、delayedCount/aheadCount/onTimeCount/completedCount/notStartedCount、exclusionRangeCount)。
+  - 錯誤：`GanttEngineError`(invalid_date/invalid_range/invalid_threshold)。
+- `apps/api/src/projects/gantt-engine.spec.ts`：jest 單元測試 **27 案**(sandbox 以 tsc CommonJS + node 跑全綠；引擎另過 tsc --strict + --noUnusedLocals/--noUnusedParameters)。涵蓋 ratioOf 端點/夾擠/零跨距、expectedProgress 線性與零工期、狀態分類五態與邊界、月份刻度跨年、buildGantt 整合(軸涵蓋/今日線位置/長條端點/狀態/KPI/排除日網底/軸自動延展/無流程)、錯誤處理。
+- `apps/api/src/projects/gantt.service.ts`：`GanttService`(Prisma + ProjectService)：`getProjectGantt(projectId, {now?, toleranceThreshold?})`(讀 Project + flows + exclusions → buildGantt)、`getProjectGanttFresh`(先對有 caseId 的流程 `refreshFlowProgress` 回寫步驟比例，再產生甘特圖，反映最新完成度 §6.2)。
+- `apps/api/src/projects/projects.module.ts` / `index.ts`：註冊並 export `GanttService`、匯出 gantt-engine / gantt.service。
 
 ## 5.1 交付物（#23，專案 CRUD 與流程串接，§3/§5.1/§6.1）
 - `apps/api/src/projects/`：後端「專案管理」模組（對應專案管理模組規格 §3、§5.1、§6.1）。
@@ -139,18 +152,22 @@
 - **決策（5.1）**：專案代碼採 `PRJ-YYYYMM-####`，服務層以「該月件數+序號」產生並對 `code @unique` 碰撞遞增重試(極端退路加時間戳尾碼)。**理由**：可讀、按月可辨識，避免依賴外部序列；唯一性由 schema 把關。
 - **決策（5.1）**：專案狀態機與既有 `ProjectStatus`(ACTIVE/COMPLETED/ON_HOLD/CANCELLED)對齊，COMPLETED/CANCELLED 設為終態、同態轉移冪等合法。**理由**：對應規格 §3.1，避免誤從終態復活；冪等讓重送同狀態不報錯。
 - **決策（5.1）**：服務層只做專案/掛載 CRUD 與向下查看(getProjectDetail 展開案件步驟與負責人)；甘特圖(5.2)、延遲/超前(5.3)、排除日順延(5.4)、簡報(5.5)、雙向導覽 UI(5.6)留後續 issue。**理由**：小步前進，符合 issue 5.1 驗收範圍。
+- **決策（5.2）**：甘特圖以**純引擎輸出「呈現用幾何 + 狀態 + KPI」**(0..1 比例)交前端繪製，引擎不產生任何 SVG/DOM。**理由**：沿用純引擎風格可純函式測試；比例化讓前端自由決定像素寬度與 RWD。
+- **決策（5.2）**：時間軸範圍取 min(專案 planStart, 所有流程 planStart)..max(專案 planEnd, 所有流程 planEnd)，使超出專案計畫期間的流程(§3.2 允許重疊/先後)仍完整可見；今日線超出軸時夾擠並標 `inRange=false`。**理由**：避免長條被裁切；今日線位置正確為驗收要點。
+- **決策（5.2）**：延遲/超前狀態沿用規格 §4.2 線性預期 + §4.3 delta/容許門檻 T，T 先用引擎預設 8(§9-2 待定案，可由 GanttService 呼叫端覆寫)。**理由**：5.2 KPI 需「延遲數/超前數」，必須先有狀態判斷；完整的 5.3(天數換算、依流程型別不同門檻)留 #25。
+- **決策（5.2）**：排除日在甘特圖**僅作網底標示與 KPI 區間計數**，不在此順延 planEnd。**理由**：順延重算(串接 4.1 reschedule)屬 5.4 #26，避免越界改動流程計畫日。
 
 ## 未完成 / Handoff（下一輪或人類接手）
 1. ✅（3.1）拜訪/會議紀錄 + 成案移交藍圖持久化落地（getHandoff 可取回）。
 2. ✅（3.2）系統導入流程引擎 + 服務落地：接收銷售移交、預定義時間點/提醒、委任權限表簽核把關、**移交工程建立 ENVIRONMENT 案件**。
 3. ✅（3.3）環境建置流程引擎 + 服務落地：依銷售模式分支、接收導入移交、主機採購等待狀態、環境驗收把關→COMPLETED。
-4. **CI 全流程驗證**：3.3/3.4/4.1/4.2/5.1 引擎 + spec 已於 sandbox 驗證(tsc --strict + node 測試全綠)；各 `*.service.ts`（含 projects）以 stub(PrismaService/@nestjs/common/@prisma/client) 通過 strict typecheck（5.1 另過 --noUnusedLocals/--noUnusedParameters），惟未在真實 monorepo 跑 `pnpm -r build`(需 generated Prisma client)。下輪/人類 review 時請確認 CI build 綠。
+4. **CI 全流程驗證**：3.3/3.4/4.1/4.2/5.1/5.2 引擎 + spec 已於 sandbox 驗證(tsc --strict + node 測試全綠)；各 `*.service.ts`（含 projects、gantt）以 stub(PrismaService/@nestjs/common/@prisma/client) 通過 strict typecheck（5.1/5.2 另過 --noUnusedLocals/--noUnusedParameters），惟未在真實 monorepo 跑 `pnpm -r build`(需 generated Prisma client)。下輪/人類 review 時請確認 CI build 綠。
 5. ✅（3.4）客製化（需求變更）流程引擎 + 服務落地：需求變更單→指派鏈→開發/測試文件→複測（不通過退回循環）→測試區→正式區兩道關卡→COMPLETED。
 6. ✅（4.1）曆法遞延引擎 + CalendarService 已落地：可產生 `isExcluded` predicate 注入 onboarding/environment `buildSchedule`、支援兩種遞延模式重算、整合專案排除日(§10.5)。**仍待整合**：將 onboarding/environment service 實際呼叫 `CalendarService.buildIsExcluded()` 注入 buildSchedule(目前仍為預設 identity，未串接)；持久化假日來源(Holiday 表 / 政府行事曆匯入，§12-5)；遞延模式政策定案(目前預設 NEXT_WORKDAY)。
 7. ✅（4.2）提醒與通知引擎 + ReminderService 已落地：多時點提醒、提醒日隨到期日遞延同步、可插拔多管道(本輪僅 IN_APP 落地)、跨輪去重。**仍待**：(a) Email/其他管道 dispatcher 接外部服務並 `registerDispatcher`(§12-7)；(b) **定時觸發**——目前 `dispatchDueReminders(caseId, {now})` 為被呼叫式，尚未接排程器(cron/任務佇列)定期掃描全案件派送；(c) 提醒規則(時點密度)是否需可由流程設計器設定；(d) StepInstance.dueDate 來源——需與 5.x 專案管理/流程推進實際把 dueDate 寫入 StepInstance 後，提醒才有資料。
-8. ✅（5.1）專案 CRUD 與流程串接引擎 + ProjectService 已落地：專案 CRUD、案件掛載(允許先後/重疊)、refreshFlowProgress 依步驟比例回寫、getProjectDetail 向下查看步驟與負責人。**仍待**：(a) **5.2 甘特圖**(今日基準線、排除日標示、完成比例填色)；(b) **5.3 延遲/超前**(expected/actual delta、容許門檻 T、可選工作日基準扣假日)；(c) **5.4 排除日 CRUD 與順延重算**(串接 4.1 calendar `reschedule`/`buildIsExcluded`)；(d) **5.5 簡報模式**、**5.6 案件↔專案雙向導覽**(getProjectDetail 已回傳 caseId/步驟，UI 跳轉待補)；(e) 進度認定方式 §9-1 定案(目前預設步驟比例)。
-9. **REST controller / 前端 UI**：sales / onboarding / environment / customization / calendar / reminders / **projects** 皆尚未提供（屬後續 API 層任務；reminders 另需「通知中心」前端與已讀互動；projects 需專案管理主畫面與甘特圖）。
-10. **服務層整合測試**：sales/onboarding/environment/customization/reminders/projects service 目前僅引擎層純函式測試覆蓋；DB 行為待後續以整合測試補強。
+8. ✅（5.1）專案 CRUD 與流程串接引擎 + ProjectService 已落地。✅（5.2）甘特圖呈現引擎 + GanttService 已落地：軸/月份刻度/長條+完成填色/今日基準線+inRange/§4.2 預期進度/§4.3 狀態與 delta/排除日網底/KPI(整體進度·延遲·超前·排除日區間數)；getProjectGanttFresh 先回寫步驟比例再產生。**仍待**：(a) **5.3 延遲/超前**(#25：expected/actual delta 已有，待補天數換算、依流程型別不同的容許門檻 T、可選工作日基準扣假日)；(b) **5.4 排除日 CRUD 與順延重算**(#26：串接 4.1 calendar `reschedule`/`buildIsExcluded`，目前甘特圖僅標示排除日不順延 planEnd)；(c) **5.5 簡報模式**(#27)、**5.6 案件↔專案雙向導覽**(#28：gantt rows 已透傳 caseId、getProjectDetail 已回傳步驟，UI 跳轉待補)；(d) 進度認定方式 §9-1 定案(目前預設步驟比例)。
+9. **REST controller / 前端 UI**：sales / onboarding / environment / customization / calendar / reminders / **projects(含甘特圖)** 皆尚未提供（屬後續 API 層任務；reminders 另需「通知中心」前端與已讀互動；projects 需專案管理主畫面、甘特圖繪製與簡報模式）。
+10. **服務層整合測試**：sales/onboarding/environment/customization/reminders/projects/gantt service 目前僅引擎層純函式測試覆蓋；DB 行為待後續以整合測試補強。
 
 ## 待釐清（沿用，需求 §12 / 專案管理模組規格 §9）
 - §12-1 跨角色移交是否需主管核可、流程一律由特定角色發起 → 設計器已留「觸發角色＋條件」欄位，實際核可關卡待釐清（3.4 指派鏈已留 roleMatches 回報、未強制）。
@@ -161,4 +178,4 @@
 - §12-7 提醒管道（系統內/Email/其他）→ **4.2 已以可插拔 dispatcher 抽象並落地 IN_APP，Email/其他待主管確認管道與外部服務後 registerDispatcher 注入**；另定時觸發機制(cron/任務佇列)待規劃。
 - §12-10 附件/範本實體儲存於系統或改以 SharePoint/OneDrive 連結為主、允許檔案類型與大小上限 → 影響 2.4/2.5 上傳實作，待主管確認。
 - 專案管理模組規格 §9-1 進度認定方式（步驟比例/加權工時/人工填報）→ **5.1 先以步驟完成比例為預設並保留 progress 可人工覆寫，待主管定案**。
-- 專案管理模組規格 §9-2/§9-3/§9-6 容許門檻 T、預期進度日曆日或工作日基準、排除日順延規則 → 影響 5.3/5.4，待主管確認（5.3/5.4 尚未實作）。
+- 專案管理模組規格 §9-2/§9-3/§9-6 容許門檻 T、預期進度日曆日或工作日基準、排除日順延規則 → 影響 5.2/5.3/5.4：**5.2 甘特圖已用 §4.2 線性預期 + §4.3 預設 T=8 呈現狀態**；天數換算、依流程型別門檻、工作日基準扣假日、排除日順延 planEnd 待 #25/#26 與主管定案。
