@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { AttachmentsModule } from './attachments/attachments.module';
 import { AuthModule } from './auth/auth.module';
+import { EnvironmentModule } from './environment/environment.module';
 import { FormsModule } from './forms/forms.module';
 import { HealthController } from './health/health.controller';
 import { OnboardingModule } from './onboarding/onboarding.module';
@@ -21,6 +22,7 @@ import { WorkflowModule } from './workflow/workflow.module';
     AttachmentsModule,
     SalesModule,
     OnboardingModule,
+    EnvironmentModule,
   ],
   controllers: [HealthController],
 })
