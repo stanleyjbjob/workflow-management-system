@@ -3,10 +3,12 @@ import {
   ALL_LEAD_SOURCES,
   KNOWN_PRODUCTS,
   LeadSource,
+  SALES_RECORD_FORM_CODE,
   SalesDocKind,
   SalesEngineError,
   SalesRecordKind,
   assertValidOpportunity,
+  deserializeSalesRecord,
   filterRecordsByKind,
   finalQuote,
   isKnownProduct,
@@ -15,6 +17,7 @@ import {
   normalizeOpportunity,
   planLoss,
   planWin,
+  serializeSalesRecord,
   sortRecordsChronological,
   summarizeFailureReasons,
   validateFailure,
@@ -196,6 +199,85 @@ describe('拜訪 / 會議紀錄（append-only，§4.5 步驟2 / §4.6）', () =>
     expect(filterRecordsByKind(records, SalesRecordKind.VISIT)).toHaveLength(2);
     // 原陣列不被改動
     expect(records[0].summary).toBe('第二次');
+  });
+});
+
+describe('拜訪 / 會議紀錄序列化落地（§4.6 持久化）', () => {
+  it('serialize → deserialize round-trip 保留所有欄位', () => {
+    const rec = materializeSalesRecord({
+      kind: SalesRecordKind.MEETING,
+      summary: '需求訪談',
+      occurredAt: new Date('2026-05-01T03:00:00Z'),
+      attendees: ['業務A', '客戶B'],
+      detail: '討論客製範圍',
+    });
+    const data = serializeSalesRecord(rec);
+    expect(typeof data.occurredAt).toBe('string');
+    const back = deserializeSalesRecord(data);
+    expect(back.kind).toBe(rec.kind);
+    expect(back.summary).toBe(rec.summary);
+    expect(back.occurredAt.getTime()).toBe(rec.occurredAt.getTime());
+    expect(back.attendees).toEqual(rec.attendees);
+    expect(back.detail).toBe(rec.detail);
+    expect(Object.isFrozen(back)).toBe(true);
+  });
+
+  it('還原後可用引擎排序 / 篩選（模擬自 DB 還原多筆）', () => {
+    const stored = [
+      serializeSalesRecord(
+        materializeSalesRecord({
+          kind: SalesRecordKind.DEMO,
+          summary: 'Demo',
+          occurredAt: new Date('2026-03-01'),
+        }),
+      ),
+      serializeSalesRecord(
+        materializeSalesRecord({
+          kind: SalesRecordKind.VISIT,
+          summary: '首訪',
+          occurredAt: new Date('2026-01-01'),
+        }),
+      ),
+    ];
+    const records = stored.map(deserializeSalesRecord);
+    const sorted = sortRecordsChronological(records);
+    expect(sorted.map((r) => r.summary)).toEqual(['首訪', 'Demo']);
+    expect(filterRecordsByKind(records, SalesRecordKind.VISIT)).toHaveLength(1);
+  });
+
+  it('detail 為 null 可正確還原', () => {
+    const data = serializeSalesRecord(
+      materializeSalesRecord({ kind: SalesRecordKind.VISIT, summary: 'x' }),
+    );
+    expect(data.detail).toBeNull();
+    expect(deserializeSalesRecord(data).detail).toBeNull();
+  });
+
+  it('毀損資料丟出 record_corrupt', () => {
+    expect(() => deserializeSalesRecord(null)).toThrow(SalesEngineError);
+    expect(() =>
+      deserializeSalesRecord({ kind: 'X', summary: 'a', occurredAt: '2026-01-01' }),
+    ).toThrow(SalesEngineError);
+    expect(() =>
+      deserializeSalesRecord({ kind: SalesRecordKind.VISIT, summary: '', occurredAt: '2026-01-01' }),
+    ).toThrow(SalesEngineError);
+    expect(() =>
+      deserializeSalesRecord({
+        kind: SalesRecordKind.VISIT,
+        summary: 'a',
+        occurredAt: 'not-a-date',
+      }),
+    ).toThrow(SalesEngineError);
+    try {
+      deserializeSalesRecord(null);
+    } catch (e) {
+      expect((e as SalesEngineError).code).toBe('record_corrupt');
+    }
+  });
+
+  it('SALES_RECORD_FORM_CODE 為穩定非空字串', () => {
+    expect(typeof SALES_RECORD_FORM_CODE).toBe('string');
+    expect(SALES_RECORD_FORM_CODE.length).toBeGreaterThan(0);
   });
 });
 

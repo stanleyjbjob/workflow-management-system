@@ -78,6 +78,7 @@ export type SalesEngineErrorCode =
   | 'sale_mode_required'
   | 'record_summary_required'
   | 'record_invalid_kind'
+  | 'record_corrupt'
   | 'doc_name_required'
   | 'doc_invalid_kind'
   | 'no_final_quote'
@@ -244,6 +245,65 @@ export function filterRecordsByKind(
   kind: SalesRecordKind,
 ): SalesRecord[] {
   return records.filter((r) => r.kind === kind);
+}
+
+/* ────────────────── 拜訪 / 會議紀錄：持久化序列化 ────────────────── */
+
+/**
+ * 承載拜訪 / 會議紀錄落地的表單代碼。
+ *
+ * 設計：紀錄以 append-only 的 FormSubmission 落地（每筆一列、永不刪改），
+ * 需要一個 code 固定的 FormDefinition 作為容器；SalesService 以此 code
+ * 解析（或首次自動建立）該容器。沿用既有 forms 持久化機制，本輪不新增 migration。
+ */
+export const SALES_RECORD_FORM_CODE = 'SALES_VISIT_RECORD';
+
+/** SalesRecord 的可序列化（JSON-safe）表達，存入 FormSubmission.data。 */
+export interface SalesRecordData {
+  kind: SalesRecordKind;
+  summary: string;
+  /** ISO 8601 字串（由 Date 轉出，還原時再轉回 Date）。 */
+  occurredAt: string;
+  attendees: string[];
+  detail: string | null;
+}
+
+/** 將不可變紀錄轉為 JSON-safe 物件（occurredAt → ISO 字串）。 */
+export function serializeSalesRecord(record: SalesRecord): SalesRecordData {
+  return {
+    kind: record.kind,
+    summary: record.summary,
+    occurredAt: record.occurredAt.toISOString(),
+    attendees: [...record.attendees],
+    detail: record.detail,
+  };
+}
+
+/**
+ * 將持久化的 JSON 物件還原為不可變 SalesRecord。
+ * 對毀損 / 不合法資料丟出 SalesEngineError('record_corrupt')，避免污染調閱結果。
+ */
+export function deserializeSalesRecord(data: unknown): SalesRecord {
+  if (!data || typeof data !== 'object') throw new SalesEngineError('record_corrupt');
+  const d = data as Partial<SalesRecordData>;
+  if (!isSalesRecordKind(d.kind)) throw new SalesEngineError('record_corrupt');
+  if (typeof d.summary !== 'string' || d.summary.trim().length === 0)
+    throw new SalesEngineError('record_corrupt');
+  if (typeof d.occurredAt !== 'string') throw new SalesEngineError('record_corrupt');
+  const occurredAt = new Date(d.occurredAt);
+  if (Number.isNaN(occurredAt.getTime())) throw new SalesEngineError('record_corrupt');
+  const attendees = Array.isArray(d.attendees)
+    ? d.attendees.filter((a): a is string => typeof a === 'string')
+    : [];
+  const detail =
+    typeof d.detail === 'string' && d.detail.trim().length > 0 ? d.detail : null;
+  return Object.freeze({
+    kind: d.kind,
+    summary: d.summary,
+    occurredAt,
+    attendees,
+    detail,
+  });
 }
 
 /* ────────────────── 銷售產出文件（報價單 / 客製需求） ────────────────── */
