@@ -6,21 +6,20 @@ import { FlowType, RoleCode, StepInstanceStatus } from '@prisma/client';
  * 對應需求規格 §8 任務看板 / 待辦（issue 6.1），以「角色視角」呈現待辦、待填表單與到期提醒：
  * - 依角色 / 承辦人過濾任務（§8.5 可見範圍由 Service 以 AccessScope 先行收斂，本引擎再做檢視層過濾）。
  * - 看板分欄：待辦（TODO）/ 進行中（IN_PROGRESS）/ 即將到期（UPCOMING）/ 已完成（DONE）。
+ *   依需求，「即將到期」欄同時收納「逾期」任務（需立即處理者集中一欄），逾期仍以 overdue marker 標示。
  * - 標示：到期（dueSoon）/ 逾期（overdue）/ 受連假遞延（deferred）。
- * - KPI：待處理 / 即將到期 / 逾期 / 遞延。
+ * - KPI：待處理 / 即將到期 / 逾期 / 遞延（即將到期與逾期各自獨立計數）。
  *
  * 設計沿用 workflow / forms / templates / sales / onboarding / environment / customization /
  * calendar / delay 引擎之「純引擎 + Service」風格：本檔僅負責「分類 / 標示 / 統計」決策，
- * 不接觸資料庫，可被純函式單元測試完整覆蓋。KanbanService 再以 Prisma 載入步驟實例、
- * 以 AccessScopeService 收斂可見範圍、以 CalendarService（calendar-engine）計算遞延後，
- * 組出 KanbanTaskInput[] 餵入本引擎。
+ * 不接觸資料庫，可被純函式單元測試完整覆蓋。
  *
- * 「遞延」與行事曆解耦（與 delay-engine 注入 workdayCounter 的策略一致）：本引擎不直接相依
- * calendar-engine，而是接受每筆任務的 deferred / deferredDays 輸入，或於選項注入
- * deferralResolver(dueDate) 由 Service 以行事曆實作。
+ * 「即將到期視窗」與「遞延」皆與行事曆解耦（與 delay-engine 注入 workdayCounter 的策略一致）：
+ * - 視窗預設以工作日計（注入 `workdayCounter`，由 Service 以 CalendarService.businessDaysBetween 實作）；
+ *   未注入時退回曆日計。
+ * - 遞延：引擎接受每卡 deferred / deferredDays，或於選項注入 deferralResolver(dueDate)。
  *
- * 日界一律以 UTC 判斷（與 calendar-engine / gantt-engine / delay-engine 一致），避免執行環境
- * 時區造成跨日誤差。
+ * 日界一律以 UTC 判斷（與 calendar-engine / gantt-engine / delay-engine 一致）。
  */
 
 export type KanbanEngineErrorCode =
@@ -67,8 +66,11 @@ export const ACTIVE_STEP_STATUSES: readonly StepInstanceStatus[] = Object.freeze
   StepInstanceStatus.IN_PROGRESS,
 ]);
 
-/** 預設「即將到期」視窗（曆日）：到期日距今 0..N 天（含當日、未逾期）視為即將到期。 */
+/** 預設「即將到期」視窗：到期日距今 0..N（含當日）視為即將到期。預設以工作日計（注入 workdayCounter 時）。 */
 export const DEFAULT_UPCOMING_WITHIN_DAYS = 3;
+
+/** 工作日計數器：回傳 [from, to] 之間的工作日數（由 Service 以 calendar-engine businessDaysBetween 注入）。 */
+export type WorkdayCounter = (from: Date, to: Date) => number;
 
 /**
  * 單一任務輸入（對齊 Prisma StepInstance + 其 Case / StepDefinition，但以結構型別解耦）。
@@ -129,8 +131,10 @@ export type DeferralResolver = (dueDate: Date) => { deferred: boolean; deferredD
 export interface KanbanOptions {
   /** 評估基準時間（今日），預設 new Date()。 */
   now?: Date | string;
-  /** 「即將到期」視窗天數（曆日，>= 0），預設 3。 */
+  /** 「即將到期」視窗天數（>= 0），預設 3。提供 workdayCounter 時以工作日計，否則曆日。 */
   upcomingWithinDays?: number;
+  /** 工作日計數器；提供時「即將到期」視窗以工作日衡量（逾期仍以曆日判斷）。 */
+  workdayCounter?: WorkdayCounter;
   /** 遞延解析器；提供時，未明確標記 deferred 的任務將以此計算。 */
   deferralResolver?: DeferralResolver;
 }
@@ -161,6 +165,8 @@ export interface KanbanCard {
   dueState: DueState;
   /** 距到期之曆日數（負值＝已逾期）；無到期日為 null。 */
   daysUntilDue: number | null;
+  /** 距到期之工作日數（有注入 workdayCounter 時）；否則 null。 */
+  workdaysUntilDue: number | null;
   /** 即將到期標示（actionable 且到期日在視窗內、未逾期）。 */
   dueSoon: boolean;
   /** 逾期標示（actionable 且到期日早於今日）。 */
@@ -175,7 +181,7 @@ export interface KanbanCard {
 export interface KanbanKpi {
   /** 待處理：所有 actionable（待辦 + 進行中）任務數。 */
   pending: number;
-  /** 即將到期。 */
+  /** 即將到期（未含逾期）。 */
   upcoming: number;
   /** 逾期。 */
   overdue: number;
@@ -236,36 +242,39 @@ export function isActiveStatus(status: StepInstanceStatus): boolean {
 /**
  * 計算到期狀態（僅對 actionable 任務有意義）。
  * - 無到期日 / 非 actionable → NONE。
- * - daysUntilDue < 0 → OVERDUE（逾期）。
- * - 0 <= daysUntilDue <= window → UPCOMING（即將到期）。
+ * - 曆日 daysUntilDue < 0 → OVERDUE（逾期）。
+ * - 視窗內（metric 0..window；metric 預設 workdaysUntil，未提供則用曆日）→ UPCOMING（即將到期）。
  * - 其餘（遠期）→ NONE。
+ * @param workdaysUntil 距到期工作日數；null/undefined 表示未提供（改以曆日衡量視窗）。
  */
 export function classifyDue(
   status: StepInstanceStatus,
   dueDate: Date | null,
   now: Date,
   windowDays: number,
+  workdaysUntil?: number | null,
 ): { dueState: DueState; daysUntilDue: number | null } {
   if (!isActiveStatus(status) || dueDate == null) {
     return { dueState: 'NONE', daysUntilDue: dueDate == null ? null : calendarDaysBetween(now, dueDate) };
   }
-  const days = calendarDaysBetween(now, dueDate);
-  if (days < 0) return { dueState: 'OVERDUE', daysUntilDue: days };
-  if (days <= windowDays) return { dueState: 'UPCOMING', daysUntilDue: days };
-  return { dueState: 'NONE', daysUntilDue: days };
+  const calDays = calendarDaysBetween(now, dueDate);
+  if (calDays < 0) return { dueState: 'OVERDUE', daysUntilDue: calDays };
+  const metric = workdaysUntil != null ? workdaysUntil : calDays;
+  if (metric <= windowDays) return { dueState: 'UPCOMING', daysUntilDue: calDays };
+  return { dueState: 'NONE', daysUntilDue: calDays };
 }
 
 /**
  * 決定卡片所屬分欄（互斥）。優先序：
  *  1. 已完成（COMPLETED）→ DONE。
- *  2. actionable 且即將到期（dueState=UPCOMING）→ UPCOMING（聚焦欄；逾期不在此欄，逾期以 marker 呈現於原狀態欄）。
+ *  2. actionable 且即將到期或逾期（dueState=UPCOMING/OVERDUE）→ UPCOMING（聚焦欄，收納即將到期與逾期；逾期仍以 overdue marker 標示）。
  *  3. actionable 且 IN_PROGRESS → IN_PROGRESS。
  *  4. actionable（PENDING）→ TODO。
  * 註：SKIPPED / RETURNED 等非 actionable 且非完成之狀態不落在任何看板欄（由 buildBoard 過濾）。
  */
 export function columnOf(status: StepInstanceStatus, dueState: DueState): KanbanColumn {
   if (status === StepInstanceStatus.COMPLETED) return 'DONE';
-  if (dueState === 'UPCOMING') return 'UPCOMING';
+  if (dueState === 'UPCOMING' || dueState === 'OVERDUE') return 'UPCOMING';
   if (status === StepInstanceStatus.IN_PROGRESS) return 'IN_PROGRESS';
   return 'TODO';
 }
@@ -345,9 +354,12 @@ export function buildCard(task: KanbanTaskInput, options: KanbanOptions = {}): K
   const now = parseDateOrNull(options.now ?? new Date(), 'invalid_now') as Date;
   const windowDays = normalizeWindow(options.upcomingWithinDays);
   const dueDate = parseDateOrNull(task.dueDate, 'invalid_due_date');
-
-  const { dueState, daysUntilDue } = classifyDue(task.status, dueDate, now, windowDays);
   const active = isActiveStatus(task.status);
+
+  const workdaysUntilDue =
+    options.workdayCounter && dueDate != null ? options.workdayCounter(now, dueDate) : null;
+
+  const { dueState, daysUntilDue } = classifyDue(task.status, dueDate, now, windowDays, workdaysUntilDue);
   const { deferred, deferredDays } = resolveTaskDeferral(task, dueDate, options.deferralResolver);
 
   return {
@@ -370,6 +382,7 @@ export function buildCard(task: KanbanTaskInput, options: KanbanOptions = {}): K
     column: columnOf(task.status, dueState),
     dueState,
     daysUntilDue,
+    workdaysUntilDue: active && dueDate != null ? workdaysUntilDue : null,
     dueSoon: dueState === 'UPCOMING',
     overdue: dueState === 'OVERDUE',
     deferred,

@@ -5,13 +5,13 @@ import { SessionUser } from '../auth/auth.service';
 import { AccessScopeService } from '../rbac/access-scope.service';
 import { CalendarService } from '../calendar/calendar.service';
 import {
+  businessDaysBetween,
   calendarDaysBetween as calDaysBetween,
   deferToWorkday,
   isNonWorkday,
 } from '../calendar/calendar-engine';
 import { HolidayCalendarInput } from '../calendar/calendar-engine';
 import {
-  DeferralResolver,
   KanbanBoard,
   KanbanFilter,
   KanbanTaskInput,
@@ -25,14 +25,13 @@ import {
  * 將 kanban-engine 的純分類 / 標示 / 統計邏輯套在既有 Case / StepInstance / StepDefinition 資料上：
  * - 以 AccessScopeService 收斂「可見案件範圍」（§8.5：主管緸覽全部、其餘看自己經手＋負責流程型別）。
  * - 一張任務卡＝一筆 actionable（待辦 / 進行中）或已完成的步驟實例。
- * - 以 CalendarService（calendar-engine）計算「受連假 / 假日遞延」標示：到期日若落在非工作日，
- *   視為需遞延並算出遞延天數（沿用 4.1 遞延規則；公司自訂假日來源 §12-5 待釐清，先以內建固定日 + 週末兌底）。
+ * - 「即將到期」視窗以工作日衡量（注入 calendar-engine businessDaysBetween）。
+ * - 「受連假 / 假日遞延」標示：到期日落在非工作日→遞延，天數＝到下一工作日的曆日差（沿用 4.1）。
  *
  * 不在此處理（屬後續任務 / 已知相依）：
- * - REST controller / 前端看板繪製（API / UI 層）。
  * - 「待填表單」數（pendingRequiredForms）：引擎已預留欄位，待接上 FormsModule 統計後填入（本輪預設 0）。
- * - 公司自訂假日 / 連假 / 補班來源（§12-5）：遞延目前以 calendar-engine 內建固定假日 + 週末計，
- *   待人類定案假日來源後，於此處 buildDeferralResolver 帶入 custom 行事曆即生效。
+ * - 公司自訂假日 / 連假 / 補班來源（§12-5）：目前以 calendar-engine 內建固定日 + 週末計，
+ *   待定案後於 getBoard 的 holiday 參數帶入即生效。
  */
 @Injectable()
 export class KanbanService {
@@ -46,7 +45,7 @@ export class KanbanService {
    * 取得某使用者（依角色可見範圍）的任務看板。
    * @param user 目前登入者（SessionUser）。
    * @param filter 檢視層過濾（角色 / 承辦人 / 流程型別 / 僅與我相關）。
-   * @param options now（評估基準）/ upcomingWithinDays（即將到期視窗）/ holiday（自訂假日行事曆）。
+   * @param options now（評估基準）/ upcomingWithinDays（即將到期視窗，工作日）/ holiday（自訂假日行事曆）。
    */
   async getBoard(
     user: SessionUser,
@@ -93,27 +92,22 @@ export class KanbanService {
       isManager: this.accessScope.isManager(user),
     };
 
+    // 以同一份行事曆同時驅動「工作日視窗」與「遞延標示」。
+    const cal = this.calendar.buildCalendar(options?.holiday ?? {});
+
     return buildBoard(tasks, {
       viewer,
       filter,
       options: {
         now: options?.now,
         upcomingWithinDays: options?.upcomingWithinDays,
-        deferralResolver: this.buildDeferralResolver(options?.holiday),
+        workdayCounter: (from: Date, to: Date) => businessDaysBetween(from, to, cal),
+        deferralResolver: (dueDate: Date) => {
+          if (!isNonWorkday(dueDate, cal)) return { deferred: false };
+          const moved = deferToWorkday(dueDate, cal);
+          return { deferred: true, deferredDays: calDaysBetween(dueDate, moved) };
+        },
       },
     });
-  }
-
-  /**
-   * 以 CalendarService 行事曆建立遞延解析器：到期日落在非工作日（週末 / 假日）→ 標記遞延，
-   * 遞延天數 = 到下一個工作日的曆日差。公司自訂假日經 holiday 參數帶入（§12-5 定案後生效）。
-   */
-  private buildDeferralResolver(holiday?: HolidayCalendarInput): DeferralResolver {
-    const cal = this.calendar.buildCalendar(holiday ?? {});
-    return (dueDate: Date) => {
-      if (!isNonWorkday(dueDate, cal)) return { deferred: false };
-      const moved = deferToWorkday(dueDate, cal);
-      return { deferred: true, deferredDays: calDaysBetween(dueDate, moved) };
-    };
   }
 }
