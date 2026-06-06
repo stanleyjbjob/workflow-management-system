@@ -5,6 +5,7 @@ import { FormsModule } from './forms/forms.module';
 import { HealthController } from './health/health.controller';
 import { PrismaModule } from './prisma/prisma.module';
 import { RbacModule } from './rbac/rbac.module';
+import { SalesModule } from './sales/sales.module';
 import { TemplatesModule } from './templates/templates.module';
 import { WorkflowModule } from './workflow/workflow.module';
 
@@ -17,6 +18,7 @@ import { WorkflowModule } from './workflow/workflow.module';
     FormsModule,
     TemplatesModule,
     AttachmentsModule,
+    SalesModule,
   ],
   controllers: [HealthController],
 })
