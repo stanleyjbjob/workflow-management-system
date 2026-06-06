@@ -24,7 +24,7 @@
 | 2.3 | #14 表單與產出文件管理 | ✅ done | apps/api `forms/` 純引擎（驗證/簽核/必填把關/跨步驟引用）+ FormsService、25 項 jest 單元測試 |
 | 2.4 | #15 作業範本附檔 | ✅ done | apps/api `templates/` 純引擎（驗證/版本計算/最新版/歷史/下載解析）+ TemplatesService、26 項 jest 單元測試 |
 | 2.5 | #16 附件與連結管理（SharePoint/OneDrive）| ✅ done | apps/api `attachments/` 純引擎 + AttachmentsService、44 項 jest 單元測試 |
-| 3.1 | #17 銷售流程 | 🔄 in-progress | 引擎(商機/紀錄/成案移交/失敗統計)+序列化落地 + SalesService(含拜訪紀錄 append-only 持久化)、35 項引擎測試。**未完成**：下游移交/失敗 Enum/REST/UI，見 handoff |
+| 3.1 | #17 銷售流程 | 🔄 in-progress | 引擎(商機/紀錄/成案移交/失敗統計)+紀錄序列化(engine) + **移交藍圖序列化**(新檔 sales-handoff) 落地 + SalesService(拜訪紀錄 + 成案移交 append-only 持久化)、引擎35+移交6 測試。**未完成**：下游 ONBOARDING 案件建立(3.2/5.x)、失敗 Enum(§12-2)、REST/UI，見 handoff |
 | 3.2~6.x | #18-#30 | 待辦 | 依 WBS 順序 |
 
 ## 3.1 交付物（#17，partial）
@@ -35,11 +35,14 @@
     - **（本輪新增）紀錄持久化序列化**：`SALES_RECORD_FORM_CODE`、`serializeSalesRecord`（occurredAt→ISO 字串）、`deserializeSalesRecord`（還原為凍結紀錄，毀損資料丟 `record_corrupt`）。
     - 產出/成案（§4.5 步驟3~5a、§4.6）：`SalesDoc`、`latestDoc` / `finalQuote`、`planWin` → `HandoffPayload`；無定版報價單則拋 `no_final_quote`。
     - 失敗（§4.5 步驟5b、§4.6）：`planLoss` 轉 FAILED + 結構化、`summarizeFailureReasons` 依分類統計。
-  - `sales-engine.spec.ts`：jest 單元測試 **35 項**（本輪 +5：序列化 round-trip / 還原後排序篩選 / null detail / 毀損 / 常數；以 sandbox node 驗證新邏輯全綠）。
+  - `sales-handoff.ts`（**本輪新增**，與 engine 同層、index re-export）：成案移交「持久化序列化」純邏輯——`SALES_HANDOFF_FORM_CODE`、`HandoffData`、`serializeHandoff` / `deserializeHandoff`（毀損資料丟 `SalesHandoffError('handoff_corrupt')`），使「成案產出自動帶往導入」可落地。
+  - `sales-handoff.spec.ts`（**本輪新增**）：jest 單元測試 6 項（round-trip 含 JSON 來回 / 無客製需求 / 毀損 / 非物件 / 客製欄位毀損 / 常數）。
+  - `sales-engine.spec.ts`：jest 單元測試 **35 項**（引擎邏輯；本輪未改動）。移交序列化測試另置於 `sales-handoff.spec.ts`（6 項）；以 sandbox node 驗證新邏輯全綠、tsc --strict 驗證型別。
   - `sales.service.ts`：`SalesService`（Prisma）：
     - createOpportunity（建 SALES Case）/ markWon（planWin + Case→COMPLETED）/ markLost（Case→FAILED，failureReason 編碼 `category|reason`）/ failureStatistics。
     - **（本輪新增）addSalesRecord**：每筆拜訪/會議紀錄存為一筆 `FormSubmission`（append-only，不刪改，永久留存）；以專用 `FormDefinition`（code=`SALES_VISIT_RECORD`，resolve-or-create）作為容器。
-    - **（本輪新增）listSalesRecords**：自 FormSubmission 還原、依時間排序、可依類型篩選（永久可調閱）。
+    - **（本輪新增）markWon 移交落地 + getHandoff**：成案時把 planWin 的移交藍圖以 append-only FormSubmission 落地（專用 code=`SALES_HANDOFF`），`getHandoff(caseId)` 供後續導入/客製化流程取回已帶往的產出引用；使「成案產出自動帶往導入」durable。
+    - listSalesRecords：自 FormSubmission 還原、依時間排序、可依類型篩選（永久可調閱）。
   - `sales.module.ts` / `index.ts`：`SalesModule`（已於 `app.module.ts` 註冊）。
 
 ## 技術決策（供 review）
@@ -47,11 +50,13 @@
 - **決策**：拜訪/會議紀錄以 `Object.freeze` 不可變物件表達「append-only / 永久留存」；引擎不提供刪改 API。**理由**：對應 §4.6。
 - **決策（本輪）**：拜訪/會議紀錄持久化沿用既有 `FormSubmission`（不新增 migration），每筆紀錄＝一筆 SUBMITTED 的 FormSubmission，掛在固定 code 的專用 FormDefinition 下，`data` 以 `serializeSalesRecord` 承載。**理由**：對應進度規劃「沿用 forms 持久化」，避免在 §12-2/§12-10 未定前新增資料表；append-only 由「只新增不更新」與服務層不提供刪改達成。**權衡**：未來若需結構化查詢紀錄欄位，可再評估獨立資料表。
 - **決策**：成案移交以 `HandoffPayload.carriedDocRefIds` 帶出產出引用，不複製檔案。**理由**：對應 §4.6；下游 ONBOARDING 案件建立/連結待 5.x 一併設計（見 handoff）。
+- **決策（本輪）**：成案移交藍圖以 append-only FormSubmission（專用 code=`SALES_HANDOFF`）durable 落地，並提供 `getHandoff` 讀回，序列化邏輯獨立為 `sales-handoff.ts`。**理由**：使「成案產出自動帶往導入」不再僅是記憶體回傳值；獨立成檔以聚焦移交落地、不動既有 engine/測試，review 時可決定是否併回。**權衡**：實際建立下游 ONBOARDING 案件實體仍待 3.2 串接。
 - **決策**：失敗分類 `category` 暫以可擴充字串承載、`Case.failureReason` 以 `category|reason` 編碼。**理由**：§12-2 屬待釐清，不臆測固定 Enum。
 
 ## 未完成 / Handoff（下一輪或人類接手）
-1. ✅（本輪完成）拜訪/會議紀錄持久化落地 — 已於 SalesService 以 FormSubmission append-only 實作 add/list。
-2. **成案下游移交**：markWon 目前僅回傳 HandoffPayload 並轉 Case 狀態；尚未自動建立/連結後續 ONBOARDING 案件（§3 流程銜接）。待與 5.x 導入流程一併設計。
+1. ✅（前一輪完成）拜訪/會議紀錄持久化落地 — SalesService 以 FormSubmission append-only 實作 add/list。
+   ✅（本輪完成）成案移交藍圖持久化落地 — markWon 落地 + getHandoff 取回。
+2. **成案下游案件建立**：移交藍圖已 durable 落地（markWon 持久化 + getHandoff 可取回），資料層「自動帶往導入」已達成；惟尚未自動**建立/連結**後續 ONBOARDING 案件實體（§3 流程銜接），待 3.2 系統導入流程實作時據 getHandoff 串接。
 3. **失敗分類 schema 收斂**：待 §12-2 確認失敗原因分類清單後，將 category 由字串收斂為 Enum/獨立欄位或資料表，並調整 failureStatistics 查詢。
 4. **REST controller / 前端 UI**：尚未提供（與 2.3/2.4/2.5 同，屬後續 API 層任務）。
 5. **服務層整合測試**：addSalesRecord/listSalesRecords 目前僅引擎層純函式測試覆蓋；DB 行為待後續以整合測試補強（與其他 service 同，本 repo 目前無 Prisma 整合測試）。
