@@ -1,0 +1,103 @@
+/**
+ * 稽核軌跡示範資料（issue 8.3 #35）。
+ * 供 REST 未連線時的展示與元件預設值（與 task-kanban / project-gantt seed 同用途）。
+ * 數字與 sampleTrailSummary 保持一致。
+ */
+import type { TraceabilityRecord, TrailSummary } from './types';
+
+export const sampleTrailRecords: TraceabilityRecord[] = [
+  {
+    recordType: 'FORM_SUBMISSION',
+    recordId: 'fs-001',
+    title: '委任權限表（簽核）',
+    documentKind: 'DELEGATION_AUTH',
+    isoAspect: '存取控制、權限授予紀錄',
+    annexHint: null,
+    version: 2,
+    requiresSignature: true,
+    signStatus: 'APPROVED',
+    signedOff: true,
+    events: [
+      { action: 'CREATED', actorId: 'u-amy', at: '2026-05-12T01:00:00.000Z' },
+      { action: 'SUBMITTED', actorId: 'u-amy', at: '2026-05-12T03:20:00.000Z' },
+      { action: 'APPROVED', actorId: 'u-mgr', at: '2026-05-13T06:00:00.000Z', detail: '主管核可' },
+    ],
+    occurredAt: '2026-05-13T06:00:00.000Z',
+    retentionUntil: '2033-05-13T06:00:00.000Z',
+    caseId: 'case-onb-1',
+    projectId: 'prj-1',
+    actorId: 'u-amy',
+  },
+  {
+    recordType: 'FORM_SUBMISSION',
+    recordId: 'fs-002',
+    title: '需求變更單 CR-0007',
+    documentKind: 'CHANGE_REQUEST',
+    isoAspect: '變更管理流程',
+    annexHint: null,
+    version: 1,
+    requiresSignature: true,
+    signStatus: 'SUBMITTED',
+    signedOff: false,
+    events: [
+      { action: 'CREATED', actorId: 'u-bob', at: '2026-06-01T02:00:00.000Z' },
+      { action: 'SUBMITTED', actorId: 'u-bob', at: '2026-06-01T02:30:00.000Z' },
+    ],
+    occurredAt: '2026-06-01T02:30:00.000Z',
+    retentionUntil: null,
+    caseId: 'case-cus-9',
+    projectId: 'prj-1',
+    actorId: 'u-bob',
+  },
+  {
+    recordType: 'ATTACHMENT',
+    recordId: 'att-101',
+    title: '驗收測試報告.pdf',
+    documentKind: 'TEST_DOC',
+    isoAspect: '變更管理、測試紀錄',
+    annexHint: null,
+    version: 1,
+    requiresSignature: false,
+    signStatus: 'NONE',
+    signedOff: false,
+    events: [{ action: 'UPLOADED', actorId: 'u-eng', at: '2026-06-03T09:10:00.000Z', detail: 'SharePoint 連結' }],
+    occurredAt: '2026-06-03T09:10:00.000Z',
+    retentionUntil: null,
+    caseId: 'case-cus-9',
+    projectId: null,
+    actorId: 'u-eng',
+  },
+  {
+    recordType: 'LOGIN',
+    recordId: 'login-555',
+    title: 'SSO 登入（u-mgr）',
+    documentKind: 'LOGIN_AUDIT',
+    isoAspect: 'A.5 存取控制 / 稽核軌跡',
+    annexHint: 'A.5',
+    version: 1,
+    requiresSignature: false,
+    signStatus: 'NONE',
+    signedOff: false,
+    events: [{ action: 'LOGIN', actorId: 'u-mgr', at: '2026-06-05T00:55:00.000Z' }],
+    occurredAt: '2026-06-05T00:55:00.000Z',
+    retentionUntil: '2027-06-05T00:55:00.000Z',
+    caseId: null,
+    projectId: null,
+    actorId: 'u-mgr',
+  },
+];
+
+export const sampleTrailSummary: TrailSummary = {
+  total: 4,
+  byType: { FORM_SUBMISSION: 2, ATTACHMENT: 1, LOGIN: 1 },
+  byAspect: {
+    '存取控制、權限授予紀錄': 1,
+    變更管理流程: 1,
+    '變更管理、測試紀錄': 1,
+    'A.5 存取控制 / 稽核軌跡': 1,
+  },
+  signableCount: 2,
+  signedCount: 1,
+  pendingSignatureCount: 1,
+  expiredRetentionCount: 0,
+};
