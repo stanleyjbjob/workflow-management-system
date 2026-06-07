@@ -41,7 +41,22 @@
 | 6.2 | #30 ISO 27001 文件化軌跡 | ✅ done | 後端 iso-trail 引擎+IsoTrailService+REST（GET /iso-trail、/summary、/export、/export.csv）、37 案引擎測試；前端查閱頁屬 8.3（#35） |
 | 7.1 | #31 Holiday 假日資料表與行事曆 DB 化 | ✅ done | **首次正式 migration**：Holiday 表+seed+CRUD、CalendarService.loadCalendar 讀 DB、kanban 遞延 DB 驅動、CI migration-check job；**onboarding/environment buildSchedule 已注入 buildIsExcluded（identity 取代完成）**。詳見「7.1 交付物」 |
 | 7.2 | #32 提醒 Email(SMTP) 寄送與每日定時排程 | ✅ done | SMTP EMAIL dispatcher（env 驅動、與 nodemailer 解耦）+ @nestjs/schedule 每日 cron 掃描逐案派送；EMAIL 與 IN_APP 並存；dedupKey 跨日去重、失敗不落日誌下一輪自動重試；26 案測試。詳見「7.2 交付物」 |
-| 8.1~10.1 | #33~#38 | 待辦 | REST 補齊/前端串接/ISO 前端/整合測試/CI 全流程/規則定案；**8.1（#33）為下一個可動工** |
+| 8.1 | #33 後端 REST API 補齊 | 🔄 進行中 | **projects controller 已落地（2026-06-07，commit `c2f00a1`）**：專案 CRUD/狀態機/掛載流程/進度回寫/甘特/延遲/排除日 CRUD/衝突警示共 17 端點，沿用 Kanban guard 風格；**其餘模組（sales/onboarding/environment/customization/calendar/reminders）待後續輪次**。詳見「8.1 交付物（進行中）」 |
+| 8.2~10.1 | #34~#38 | 待辦 | 前端串接/ISO 前端/整合測試/CI 全流程/規則定案 |
+
+## 8.1 交付物（#33，後端 REST API 補齊 — 🔄 進行中）
+- **本輪（2026-06-07，第 1 批：projects，commit `c2f00a1`）**：
+  - `apps/api/src/projects/projects.controller.ts`（新增）：`ProjectsController`，`@Controller('projects')` + `@UseGuards(SessionAuthGuard, PermissionsGuard)` + `@Permissions(...)` + `@CurrentUser`（沿用 KanbanController 風格），與既有 Service 方法一一對應：
+    - 專案 CRUD：`GET /projects`（status/ownerId 過濾）、`POST /projects`（createdById＝登入者 user.sub）、`GET /projects/:id`、`GET /projects/:id/detail`（向下展開步驟與負責人）、`PATCH /projects/:id`、`PATCH /projects/:id/status`（狀態機把關）、`DELETE /projects/:id`。
+    - 掛載流程：`POST /projects/:id/flows`、`PATCH /projects/flows/:projectFlowId`、`DELETE /projects/flows/:projectFlowId`、`POST /projects/flows/:projectFlowId/refresh-progress`。
+    - 甘特/延遲：`GET /projects/:id/gantt?fresh=&now=&toleranceThreshold=`、`GET /projects/:id/delays?fresh=&now=&basis=&threshold=`（basis=CALENDAR|WORKDAY）。
+    - 排除日：`GET/POST /projects/:id/exclusions`、`PATCH/DELETE /projects/exclusions/:exclusionId`、`GET /projects/:id/exclusion-conflicts?includeAllFlows=`（§9-6 A 案警示）。
+  - `projects.module.ts`：掛 `controllers: [ProjectsController]`，imports 增加 `RbacModule` + `AuthModule`（PermissionsGuard / SessionAuthGuard 依賴）。`index.ts` 補 export。app.module 既已註冊 ProjectsModule，無需改動。
+  - 驗證：controller + module 於 sandbox 以 tsc（strict + noUnusedLocals/noUnusedParameters、experimentalDecorators）對既有服務之**真實公開簽名 stub** 全綠；真實 monorepo `pnpm -r build` 歸 9.2（#37）。
+- **決策（8.1 第 1 批）**：權限對應＝查詢類 `project:read`、建立 `project:create`、編輯/掛載/排除日維護 `project:update`、刪除專案 `project:manage`（主管層級）。**理由**：直接沿用 1.4 既有權限矩陣語意（SALES/CONSULTANT 可建立與編輯、僅 MANAGER 有 project:manage）。
+- **決策（8.1 第 1 批）**：query 非法值（日期/數值/status/basis）一律 400 + `{code:'invalid_query'}`；body 驗證不另寫 DTO class，直接沿用各引擎 `guard()`→BadRequestException（保留 code）慣例。**理由**：與 issue「DTO 驗證、錯誤碼沿用既有 guard()→HTTP 例外慣例」一致，避免重複驗證邏輯。
+- **決策（8.1 第 1 批）**：literal 路徑段路由（`flows/...`、`exclusions/...`）宣告於 `:id` 參數路由之前，避免被攔截。
+- **待續（下一輪接力）**：sales、onboarding、environment、customization 四大流程 controller；calendar（含 Holiday CRUD 主管維護端點，見 7.1 註記）與 reminders controller。
 
 ## 7.2 交付物（#32，提醒 Email(SMTP) 寄送與每日定時排程，§8.3 / §12-7）
 - `apps/api/src/reminders/email-dispatcher.ts`：**純邏輯**（不依賴 nodemailer/Nest/Prisma，可純函式測試）。
@@ -141,7 +156,7 @@
 - `apps/api/src/projects/gantt-engine.spec.ts`：jest 單元測試 **27 案**(sandbox 以 tsc CommonJS + node 跑全綠；引擎另過 tsc --strict + --noUnusedLocals/--noUnusedParameters)。涵蓋 ratioOf 端點/夾擠/零跨距、expectedProgress 線性與零工期、狀態分類五態與邊界、月份刻度跨年、buildGantt 整合(軸涵蓋/今日線位置/長條端點/狀態/KPI/排除日網底/軸自動延展/無流程)、錯誤處理。
 - `apps/api/src/projects/gantt.service.ts`：`GanttService`(Prisma + ProjectService)：`getProjectGantt(projectId, {now?, toleranceThreshold?})`(讀 Project + flows + exclusions → buildGantt)、`getProjectGanttFresh`(先對有 caseId 的流程 `refreshFlowProgress` 回寫步驟比例，再產生甘特圖，反映最新完成度 §6.2)。
 - `apps/api/src/projects/projects.module.ts` / `index.ts`：註冊並 export `GanttService`、匯出 gantt-engine / gantt.service。
-- **前端（5.5 補充）**：5.5 已在 `apps/web` 新增 `project-gantt` feature 將本引擎的 `GanttView` 結構繪製為甘特圖(以前端鏡像型別解耦)，並提供簡報模式。後端 REST controller 仍待後續 API 任務。
+- **前端（5.5 補充）**：5.5 已在 `apps/web` 新增 `project-gantt` feature 將本引擎的 `GanttView` 結構繪製為甘特圖(以前端鏡像型別解耦)，並提供簡報模式。**8.1 起後端 REST 已提供 GET /projects/:id/gantt**，前端改 fetch 屬 8.2（#34）。
 
 ## 5.1 交付物（#23，專案 CRUD 與流程串接，§3/§5.1/§6.1）
 - `apps/api/src/projects/`：後端「專案管理」模組（對應專案管理模組規格 §3、§5.1、§6.1）。
@@ -234,7 +249,7 @@
 - 甘特圖即時呈現：沿用 5.2 gantt-engine 之 `exclusions[]` 網底 + GanttService 讀同一張 Exclusion 表，新增/移除後即時反映，無需於本模組重複。
 - **決策（5.4）**：排除日 CRUD/驗證抽為 `exclusion-engine.ts`(純邏輯) + `ExclusionService`(獨立服務，注入 Prisma + CalendarService)，**不改動 project.service.ts**。**理由**：SRP、與 module「引擎+Service」風格一致，降低改動既有大型服務的風險。
 - **決策（5.4）**：時程避讓**委派 4.1 CalendarService**(deferToWorkday/reschedule，讀同一張 Exclusion 表)，排除日與國定假日**併行**套用(§7)；甘特網底沿用 5.2 gantt-engine。**理由**：避免重複實作曆法邏輯；單一資料來源(Exclusion 表)使 CRUD→避讓→甘特三者一致。
-- **決策（5.4）**：**刻意不自動順延 ProjectFlow.planEnd**——`rescheduleWithExclusions` 僅回傳重算結果不寫回。**理由**：§9-6(落入流程區間是否自動順延 planEnd)規格以「建議」表述、尚未定案，屬業務規則不臆測；待人類確認後再串接寫回。
+- **決策（5.4）**：**刻意不自動順延 ProjectFlow.planEnd**——`rescheduleWithExclusions` 僅回傳重算結果不寫回。**理由**：§9-6(落入流程區間是否自動順延 planEnd)規格以「建議」表述、尚未定案，屬業務規則不臆測；待人類確認後再串接寫回。**（後續業務裁示採 A 案：不自動順延、改衝突警示 getExclusionConflicts，8.1 已提供 REST 端點）**
 
 ## 技術決策（供 review）
 - **決策**：沿用 2.x/3.1/3.2「純引擎 + Service」風格，引擎不依賴 DB 可被純函式測試。**理由**：一致、可測。
@@ -273,6 +288,7 @@
 - **決策（7.1）**：Holiday 表由主管維護（GOVERNMENT/COMPANY 來源、HOLIDAY/MAKEUP_WORKDAY 類型，date @unique）；loadCalendar 讀 DB 合併內建範例與呼叫端自訂，補班與假日衝突沿用引擎「假日優先」。
 - **決策（7.1）**：onboarding 排程引擎泛型化 `<S = OnboardingStep>`（buildSchedule/dueReminders/checkpoint 型別），環境建置帶 `EnvironmentStep` 重用；環境 checkpoints 不內建預設位移（§6 未定義、不臆測）。
 - **決策（7.2）**：SMTP dispatcher 與 nodemailer 以 `MailTransport` 介面解耦、收件人 email 以 resolver 注入（接 Prisma User.email）；SMTP env 未設定時優雅降級僅 IN_APP；寄送失敗不落去重日誌→下一輪 cron 自動重試（dedupKey 含 fireIsoDate 故跨日不重送）。詳見「7.2 交付物」。
+- **決策（8.1 第 1 批）**：projects REST 權限對應＝查詢 `project:read`、建立 `project:create`、編輯/掛載/排除日 `project:update`、刪除 `project:manage`；query 非法值 400 `invalid_query`；body 驗證沿用引擎 guard() 慣例不另寫 DTO class。詳見「8.1 交付物」。
 
 ## 前端 UI 改版（2026-06-07，對齊 prototype/index.html）
 依主管指示，`apps/web` 整體視覺對齊 `prototype/index.html`（6/7 版）。**僅改呈現層，引擎/服務/測試邏輯不動**。
@@ -292,17 +308,18 @@
 1. ✅（3.1）拜訪/會議紀錄 + 成案移交藍圖持久化落地（getHandoff 可取回）。
 2. ✅（3.2）系統導入流程引擎 + 服務落地：接收銷售移交、預定義時間點/提醒、委任權限表簽核把關、**移交工程建立 ENVIRONMENT 案件**。
 3. ✅（3.3）環境建置流程引擎 + 服務落地：依銷售模式分支、接收導入移交、主機採購等待狀態、環境驗收把關→COMPLETED。
-4. **CI 全流程驗證**：3.3~7.2 各純引擎 + spec 已於 sandbox 驗證(tsc --strict + node 測試全綠)；各 `*.service.ts` + controller 以 stub 通過 strict typecheck，惟未在真實 monorepo 跑 `pnpm -r build`(需 generated Prisma client；**7.2 新增 @nestjs/schedule / nodemailer 相依，請先 pnpm install**)。**前端 vitest 在 sandbox 觸發 worker bus error 改以等價 harness 全綠，請 review 時在真實環境跑 `pnpm --filter @wfms/web test` 確認**。屬 9.2（#37）範圍。
+4. **CI 全流程驗證**：3.3~8.1 各純引擎 + spec 已於 sandbox 驗證(tsc --strict + node 測試全綠)；各 `*.service.ts` + controller 以 stub 通過 strict typecheck，惟未在真實 monorepo 跑 `pnpm -r build`(需 generated Prisma client；**7.2 新增 @nestjs/schedule / nodemailer 相依，請先 pnpm install**)。**前端 vitest 在 sandbox 觸發 worker bus error 改以等價 harness 全綠，請 review 時在真實環境跑 `pnpm --filter @wfms/web test` 確認**。屬 9.2（#37）範圍。
 5. ✅（3.4）客製化（需求變更）流程引擎 + 服務落地。
 6. ✅（4.1→7.1）曆法遞延引擎 + CalendarService 已落地；**7.1 已完成**：假日來源持久化（Holiday 表，主管維護）＋ onboarding/environment service 實際呼叫 `CalendarService.buildIsExcluded()` 注入 buildSchedule（identity 已取代）；遞延模式定案 NEXT_WORKDAY。
 7. ✅（4.2→7.2）提醒與通知引擎 + ReminderService + **Email(SMTP) dispatcher 與每日 cron（7.2 #32）**皆已落地。**仍待**：(a) 提醒規則是否需可由設計器設定；(b) StepInstance.dueDate 來源——需與流程推進/專案管理實際寫入後，提醒才有資料；(c) 真實 SMTP 環境寄送驗證（env 設定後，9.2 一併確認）。
-8. ✅（5.1~5.6）專案管理引擎 + 服務 + 前端甘特/簡報/雙向導覽皆落地。**仍待**：§9-6 排除日落入流程區間自動順延 planEnd、§9-5 全專案 vs 特定流程、§9-1 進度認定方式定案。
-9. **REST controller / 前端 UI**：sales/onboarding/environment/customization/calendar/reminders/projects 後端 REST controller 仍未提供（8.1 #33，**下一個可動工**）。**已提供**：auth(既有)、kanban(6.1 GET /kanban)、iso-trail(6.2)。**前端**：workflow-designer(2.2)、project-gantt(5.5/5.6)、task-kanban(6.1) 皆已就緒(seed 驅動，待 REST 改 fetch，8.2 #34)；ISO 稽核查閱頁屬 8.3 #35。
+8. ✅（5.1~5.6）專案管理引擎 + 服務 + 前端甘特/簡報/雙向導覽皆落地。**仍待**：§9-6 排除日落入流程區間自動順延 planEnd（業務已裁示 A 案：不自動順延、衝突警示）、§9-5 全專案 vs 特定流程、§9-1 進度認定方式定案。
+9. **REST controller / 前端 UI**：**8.1（#33）進行中** — **projects 已提供（2026-06-07，17 端點，commit `c2f00a1`）**；sales/onboarding/environment/customization/calendar/reminders 後端 REST controller **待後續輪次接力**。**已提供**：auth(既有)、kanban(6.1 GET /kanban)、iso-trail(6.2)、**projects(8.1)**。**前端**：workflow-designer(2.2)、project-gantt(5.5/5.6)、task-kanban(6.1) 皆已就緒(seed 驅動，待 REST 改 fetch，8.2 #34)；ISO 稽核查閱頁屬 8.3 #35。
 10. **服務層整合測試**：各 service 目前僅引擎層純函式測試＋stub 接線測試覆蓋；真實 DB 行為屬 9.1（#36）。
 11. ✅（6.1）任務看板已落地。**仍待**：(a) 待填表單數 `pendingRequiredForms` 接 FormsModule 統計(目前 0)；(b) 前端改接 /kanban REST 並把 `onOpenCase` 串到實際案件詳情頁（8.2 #34）；(c) ✅ 假日來源——7.1 已改 `loadCalendar` 由 DB Holiday 表驅動。
 12. **（2026-06-07 review 新增）**：(a) ✅ **7.1 完成**——Holiday 資料表＋CalendarService DB 化＋buildSchedule 注入；(b) ✅ **7.2 完成（2026-06-07）**——SMTP `ReminderDispatcher`＋@nestjs/schedule 每日 cron 落地（SMTP_HOST 等 env 設定後啟用 EMAIL；REMINDER_CRON 可調，預設每日 08:00），詳見「7.2 交付物」。
-13. **（7.1 註記）**：Holiday CRUD 目前僅 Service 層；REST 端點（主管維護 UI 用）併入 8.1 calendar controller 補齊。環境建置排程 checkpoints 位移值待部門預定義（§12-3/§12-4 相關）。
+13. **（7.1 註記）**：Holiday CRUD 目前僅 Service 層；REST 端點（主管維護 UI 用）併入 8.1 calendar controller 補齊（**8.1 下一輪待辦**）。環境建置排程 checkpoints 位移值待部門預定義（§12-3/§12-4 相關）。
 14. **（7.2 註記）**：部署需設定 env：`SMTP_HOST`（必）、`SMTP_PORT`(預設 587)、`SMTP_SECURE`、`SMTP_USER`/`SMTP_PASS`、`SMTP_FROM`、`REMINDER_CRON`(預設 `0 8 * * *`)；帳密以 secret 管理勿入 repo。Email HTML 版型、收件人偏好設定（退訂/管道選擇）屬後續 UI 任務。
+15. **（8.1 本輪註記）**：下一輪接力順序建議＝四大流程（sales→onboarding→environment→customization）→ calendar（含 Holiday CRUD 端點）→ reminders（通知收件匣/已讀/手動觸發掃描）。各流程 Service 方法已齊，controller 對應即可；權限沿用 case:*/form:* 既有矩陣。
 
 ## 待釐清（沿用，需求 §12 / 專案管理模組規格 §9）
 - §12-1 跨角色移交是否需主管核可、流程一律由特定角色發起 → 設計器已留「觸發角色＋條件」欄位，實際核可關卡待釐清（3.4 指派鏈已留 roleMatches 回報、未強制）。
@@ -313,6 +330,6 @@
 - §12-7 提醒管道 → **已定案：先以每日定時寄送 Email(SMTP)**；**✅ 7.2 已落地：SMTP dispatcher＋每日 cron，與 IN_APP 並存**。
 - §12-10 附件/範本實體儲存於系統或改以 SharePoint/OneDrive 連結為主、允許檔案類型與大小上限 → 影響 2.4/2.5 上傳實作，待主管確認。
 - 專案管理模組規格 §9-1 進度認定方式（步驟比例/加權工時/人工填報）→ **5.1 先以步驟完成比例為預設並保留 progress 可人工覆寫，待主管定案**。
-- 專案管理模組規格 §9-2/§9-3/§9-6 容許門檻 T、預期進度日曆日或工作日基準、排除日順延規則 → 5.2/5.3/5.4 已實作可設定介面，預設值/planEnd 自動順延待主管定案。
+- 專案管理模組規格 §9-2/§9-3/§9-6 容許門檻 T、預期進度日曆日或工作日基準、排除日順延規則 → 5.2/5.3/5.4 已實作可設定介面，預設值待主管定案；§9-6 業務已裁示 A 案（不自動順延、衝突警示 getExclusionConflicts，8.1 已提供 REST 端點）。
 - 專案管理模組規格 §9-5 排除日是否區分「全專案」與「特定流程」→ 目前 Exclusion 僅 projectId(全專案)，待主管定案是否加 flowId 維度。
 - 專案管理模組規格 §10.6 簡報模式呈現範圍/版面細節 → 5.5 已落地一鍵簡報，細節待主管試用後回饋。
