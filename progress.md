@@ -10,6 +10,7 @@
 - 授權：RBAC（於 1.4 定案）。
 - 前端：**Vite + React 18 + TypeScript**（apps/web）；測試 **vitest**（於 2.2 引入）。
 - 後端測試：**jest + ts-jest**（apps/api）。
+- 排程：**@nestjs/schedule**（於 7.2 引入，AppModule 掛 ScheduleModule.forRoot()）；寄信：**nodemailer**（SMTP，env 驅動）。
 - CI：`.github/workflows/ci.yml` — pnpm install（`--frozen-lockfile=false`）→ `pnpm -r build` → `pnpm -r test`；**7.1 新增 migration-check job（Postgres service + `prisma migrate deploy` + seed）**。
 
 ## 各 issue 狀態
@@ -29,7 +30,7 @@
 | 3.3 | #19 環境建置流程 | ✅ done | apps/api `environment/` 純引擎(依銷售模式分支買斷/訂閱、接收導入移交、主機採購等待狀態、表單齊備+環境驗收把關、接收藍圖序列化)、55 項測試(sandbox 全綠 + tsc --strict 通過)；EnvironmentService(receiveFromOnboarding/recordHostProcurement+等待狀態 ON_HOLD/getHostReadiness/submitEnvironmentForm/getFormStatuses/completeEnvironment→COMPLETED)；app.module 註冊 EnvironmentModule。REST/UI 屬後續 |
 | 3.4 | #20 客製化（需求變更）流程 | ✅ done | apps/api `customization/` 純引擎(指派鏈把關/狀態機/複測退回循環/測試區→正式區兩道關卡/需求變更單序列化)、40 項測試(sandbox 全綠 + tsc --strict 通過)；CustomizationService(raiseChangeRequest/assignEngLead/assignEngineer/submitForm/submitForRetest/recordRetest/confirmTestDeploy/confirmProdDeploy + append-only 狀態事件持久化)；app.module 註冊 CustomizationModule。REST/UI 屬後續 |
 | 4.1 | #21 行事曆判斷：假日/連假遞延 | ✅ done | apps/api `calendar/` 純引擎(假日/週末/補班判斷、遞延、工作日運算、兩種遞延模式重算)+CalendarService(專案排除日 §10.5)、45 項斷言全綠 + tsc --strict 通過 |
-| 4.2 | #22 提醒與通知 | ✅ done | apps/api `reminders/` 純引擎(提前/到期/逾期多時點、提醒日由「已遞延到期日」推導故遞延同步調整、多管道 IN_APP/EMAIL/OTHER 可插拔 dispatcher、跨輪去重、派送日誌序列化)、21 案/53 斷言全綠 + tsc --strict 通過；ReminderService(由 StepInstance 組對象→行事曆遞延→挑應派送→IN_APP 落地 NOTIFICATION_INBOX + 去重日誌 NOTIFICATION_DISPATCH_LOG)；app.module 註冊 RemindersModule。REST/UI 與 Email/其他管道 dispatcher 屬後續 |
+| 4.2 | #22 提醒與通知 | ✅ done | apps/api `reminders/` 純引擎(提前/到期/逾期多時點、提醒日由「已遞延到期日」推導故遞延同步調整、多管道 IN_APP/EMAIL/OTHER 可插拔 dispatcher、跨輪去重、派送日誌序列化)、21 案/53 斷言全綠 + tsc --strict 通過；ReminderService(由 StepInstance 組對象→行事曆遞延→挑應派送→IN_APP 落地 NOTIFICATION_INBOX + 去重日誌 NOTIFICATION_DISPATCH_LOG)；app.module 註冊 RemindersModule。REST/UI 屬後續；**EMAIL(SMTP)+每日 cron 已於 7.2 落地** |
 | 5.1 | #23 專案 CRUD 與流程串接 | ✅ done | apps/api `projects/` 純引擎(輸入驗證/PRJ-YYYYMM-#### 代碼/專案狀態機/掛載視窗驗證允許先後與重疊/步驟完成比例+整體進度計算)、30 案測試(sandbox node 全綠 + tsc --strict、--noUnusedLocals 通過)；ProjectService(createProject/getProject/listProjects/updateProject/changeStatus/deleteProject/mountFlow/updateFlowWindow/unmountFlow/refreshFlowProgress/getProjectDetail 向下查看步驟與負責人)；app.module 註冊 ProjectsModule。沿用既有 Project/ProjectFlow/Exclusion schema 不新增 migration。REST/UI 屬後續 |
 | 5.2 | #24 甘特圖與進度呈現 | ✅ done | apps/api `projects/gantt-engine.ts` 純引擎(時間軸範圍/月份刻度/各流程長條+完成填色 fillRatio/今日基準線+inRange/§4.2 預期進度/§4.3 狀態 delta+容許門檻 T/排除日網底/KPI 整體進度·延遲·超前·排除日區間數)、**27 案測試**(sandbox node 全綠 + tsc --strict、--noUnusedLocals/Parameters 通過)；GanttService(getProjectGantt / getProjectGanttFresh 先回寫步驟比例再產生)；projects.module 註冊並 export GanttService。沿用既有 schema 不新增 migration。REST/UI 屬後續 |
 | 5.3 | #25 延遲／超前計算 | ✅ done | apps/api `projects/` delay-engine 純引擎(重用 5.2 expectedProgress/classifyFlowStatus 判五態 + 差異百分比→差異天數換算、日曆日/工作日基準可選、依流程型別覆寫容許門檻 T、完成/未開始差異天數歸零)、**22 案測試**(sandbox tsc --strict + node 全綠)；DelayService(getProjectDelays/getProjectDelaysFresh，WORKDAY 基準經 CalendarService.buildCalendar + businessDaysBetween 注入)；projects.module 註冊 DelayService(imports CalendarModule)。沿用既有 schema 不新增 migration。REST/UI 屬後續 |
@@ -39,8 +40,26 @@
 | 6.1 | #29 任務看板與待辦 | ✅ done | apps/api `kanban/` 純引擎+KanbanService+KanbanController(GET /kanban)+apps/web task-kanban 前端看板頁；47+10 案測試。**7.1 起 getBoard 改用 loadCalendar（DB 假日驅動遞延標示）** |
 | 6.2 | #30 ISO 27001 文件化軌跡 | ✅ done | 後端 iso-trail 引擎+IsoTrailService+REST（GET /iso-trail、/summary、/export、/export.csv）、37 案引擎測試；前端查閱頁屬 8.3（#35） |
 | 7.1 | #31 Holiday 假日資料表與行事曆 DB 化 | ✅ done | **首次正式 migration**：Holiday 表+seed+CRUD、CalendarService.loadCalendar 讀 DB、kanban 遞延 DB 驅動、CI migration-check job；**onboarding/environment buildSchedule 已注入 buildIsExcluded（identity 取代完成）**。詳見「7.1 交付物」 |
-| 7.2 | #32 提醒 Email(SMTP) 寄送與每日定時排程 | 待辦 | 下一個可動工 |
-| 8.1~10.1 | #33~#38 | 待辦 | REST 補齊/前端串接/ISO 前端/整合測試/CI 全流程/規則定案 |
+| 7.2 | #32 提醒 Email(SMTP) 寄送與每日定時排程 | ✅ done | SMTP EMAIL dispatcher（env 驅動、與 nodemailer 解耦）+ @nestjs/schedule 每日 cron 掃描逐案派送；EMAIL 與 IN_APP 並存；dedupKey 跨日去重、失敗不落日誌下一輪自動重試；26 案測試。詳見「7.2 交付物」 |
+| 8.1~10.1 | #33~#38 | 待辦 | REST 補齊/前端串接/ISO 前端/整合測試/CI 全流程/規則定案；**8.1（#33）為下一個可動工** |
+
+## 7.2 交付物（#32，提醒 Email(SMTP) 寄送與每日定時排程，§8.3 / §12-7）
+- `apps/api/src/reminders/email-dispatcher.ts`：**純邏輯**（不依賴 nodemailer/Nest/Prisma，可純函式測試）。
+  - `SmtpConfig` / `smtpConfigFromEnv(env)`：SMTP_HOST/SMTP_PORT/SMTP_SECURE/SMTP_USER/SMTP_PASS/SMTP_FROM 由 env（帳密不入 repo）；缺 SMTP_HOST → null（Email 管道未啟用）；port 預設 587、465 推定 secure（明示 SMTP_SECURE 優先）；from 回退 SMTP_FROM→SMTP_USER→`wfms-noreply@<host>`。
+  - `renderReminderEmail(message)`：繁中主旨（沿用通知標題）+ 純文字內文（原內文＋到期日＋應完成表單＋系統自動寄送註記）。
+  - `createEmailDispatcher({transport, from, resolveEmail})`：EMAIL 管道 `ReminderDispatcher`。收件人 email 由注入 `resolveEmail(userId)` 查；查無→ok:false `recipient_email_missing`、傳輸/解析失敗捕捉為 ok:false（不外拋）。與傳輸以 `MailTransport`/`OutgoingMail` 介面解耦。
+- `apps/api/src/reminders/smtp-transport.ts`：`createSmtpTransport(config)` nodemailer 包裝（僅此檔依賴 nodemailer）。
+- `apps/api/src/reminders/reminder-scheduler.service.ts`：`ReminderSchedulerService`。
+  - onModuleInit 讀 process.env：SMTP 齊備→`registerDispatcher` 注入 EMAIL dispatcher（resolveEmail 接 Prisma User.email，停用帳號回 null）；未設定→記 log **優雅降級僅 IN_APP**（不擋啟動）。
+  - `@Cron(REMINDER_CRON)`（env 可覆寫，預設 `0 8 * * *` 每日 08:00）：`runDailySweep` 掃描「未完成（非 COMPLETED/SKIPPED）且有 dueDate 步驟」之案件（distinct caseId），逐案 `ReminderService.dispatchDueReminders`；EMAIL 啟用時 channels=[IN_APP, EMAIL]（兩管道並存）。
+  - 回傳 `SweepSummary`（casesScanned/dueCount/sentCount/failedCount/failures）；失敗以 Logger 記錄（case/channel/dedupKey/原因），且因 ReminderService 僅對 ok:true 落地 NOTIFICATION_DISPATCH_LOG，**失敗者下一輪 cron 自動重試**；單案丟錯不中斷整輪。
+- 模組接線：`RemindersModule` 註冊/export `ReminderSchedulerService`；`AppModule` 掛 `ScheduleModule.forRoot()`；`apps/api/package.json` 加 `@nestjs/schedule`、`nodemailer`（deps）與 `@types/nodemailer`（devDeps）。
+- 測試：`email-dispatcher.spec.ts`（15 案：env 解析/預設/回退、Email 內容、dispatcher 成功/缺 email/傳輸丟錯/resolver 丟錯）＋ `reminder-scheduler.service.spec.ts`（11 案：啟用/降級、dispatcher 實寄、resolveUserEmail、掃描彙整、channels 並存、失敗彙整不中斷）＝ **26 案，sandbox tsc --strict（noUnusedLocals/Parameters）+ 自製 jest-compat harness 全綠（PASS=26）**。
+- **決策（7.2）**：dispatcher 與 nodemailer 以 `MailTransport` 介面解耦、收件人 email 以 resolver 注入。**理由**：派送邏輯可純函式測試（不需真連 SMTP），沿用既有「純引擎+Service」與跨模組解耦風格。
+- **決策（7.2）**：SMTP env 未設定時優雅降級僅 IN_APP、不擋應用啟動。**理由**：部署不被外部服務綁死；§12-7 已定案 Email 為管道，設好 env 即自動啟用。
+- **決策（7.2）**：寄送失敗不落地去重日誌→下一輪 cron 自動重試；dedupKey 含 fireIsoDate 故跨日不重送、同日失敗可重試。**理由**：直接滿足 issue「失敗需記錄、可重試或留待下一輪」且不需新增重試狀態儲存。
+- **決策（7.2）**：cron 表達式於模組載入時讀 env（@Cron 裝飾器求值時機），調整 REMINDER_CRON 後重啟生效。**理由**：標準 @nestjs/schedule 用法，避免自管 SchedulerRegistry 複雜度。
+- **驗收對照**：(1) 設定 SMTP env 後到期/逾期提醒實際寄出 → dispatcher+transport 已落地（真實 SMTP 寄送驗證屬部署環境，9.2 #37 一併確認）；(2) 每日 cron 觸發且跨日不重複（dedupKey 生效）→ 完成；(3) EMAIL 與 IN_APP 並存 → 完成（channels=[IN_APP, EMAIL]）。
 
 ## 7.1 交付物（#31，Holiday 假日資料表與行事曆 DB 化，§8.3 / §12-5）
 - **上一輪（2026-06-06）**：
@@ -202,7 +221,7 @@
     - `buildCaseReminderTargets`(由 StepInstance 有 dueDate 且未完成者組對象、到期日經 `calendar.deferToWorkday` 遞延、負責人取 StepInstance.assignee→Case.assignee)。
     - `dispatchDueReminders`(展開→挑應派送→`activeDispatchers` 派送(預設內建 DbInApp dispatcher 落地 NOTIFICATION_INBOX)→成功者 append-only 落地去重日誌)。
     - `previewReminderMessages` / `listInAppNotifications` / `markNotificationRead` / `getSentDedupKeys` / `registerDispatcher` (注入 Email/其他管道)。
-  - `reminders.module.ts` / `index.ts`：`RemindersModule`(imports PrismaModule + CalendarModule)。
+  - `reminders.module.ts` / `index.ts`：`RemindersModule`(imports PrismaModule + CalendarModule)。**7.2 起新增 ReminderSchedulerService（每日 cron + SMTP EMAIL dispatcher 註冊），見「7.2 交付物」**。
 - `apps/api/src/app.module.ts`：註冊 `RemindersModule`。
 
 ## 5.4 交付物（#26，專案行事曆排除日，規格 §5.5 / §10.5 / §3.3 / §6.3）
@@ -233,7 +252,7 @@
 - **決策（4.1→7.1）**：假日來源原為「範例固定日 + 呼叫端自訂」；主管定案後 **7.1 已落地 `Holiday` 資料表（主管維護）**，CalendarService.loadCalendar 讀 DB 合併，專案排除日讀既有 Exclusion 表。
 - **決策（4.1）**：補班日(makeupWorkdays)與假日衝突時假日優先；補班日視為工作日以支援台灣『週六補班』情境。**理由**：符合『政府宣布放假』直覺，補班為例外的強制上班。
 - **決策（4.2）**：提醒時點不獨立儲存，而是由「已遞延的到期日(dueDate)」即時推導(computeReminderOccurrences)。**理由**：直接滿足驗收「遞延後提醒時間同步調整」——4.1 重算到期日後，提醒日自然跟著移動，無需另設同步邏輯或排程資料一致性處理。
-- **決策（4.2）**：通知管道(§12-7)以 `ReminderChannel` 列舉 + 可插拔 `ReminderDispatcher` 介面抽象，**本輪僅內建並落地系統內(IN_APP)** dispatcher(寫入 NOTIFICATION_INBOX)；Email/其他管道留 `registerDispatcher` 注入點。**更新(2026-06-07 review)**：主管決定**先以每日定時寄送 Email(SMTP)**，排入 7.2（#32）。
+- **決策（4.2）**：通知管道(§12-7)以 `ReminderChannel` 列舉 + 可插拔 `ReminderDispatcher` 介面抽象，**本輪僅內建並落地系統內(IN_APP)** dispatcher(寫入 NOTIFICATION_INBOX)；Email/其他管道留 `registerDispatcher` 注入點。**更新(2026-06-07 review)**：主管決定**先以每日定時寄送 Email(SMTP)**，排入 7.2（#32）→ **7.2 已落地（2026-06-07）**。
 - **決策（4.2）**：提醒規則以「到期前 3/1 工作日 + 到期當日 + 逾期 1 工作日」為**預設**，可由 ReminderPolicy 覆寫；offset 可選工作日或曆日。**理由**：§8.3 未明定提醒時點密度，先給合理可用預設並保留部門自訂。
 - **決策（4.2）**：派送去重以 append-only `NOTIFICATION_DISPATCH_LOG`(FormSubmission) 記 dedupKey，跨輪以 getSentDedupKeys 過濾；系統內通知落 `NOTIFICATION_INBOX`。**理由**：沿用既有「不新增 migration、FormSubmission 落地」風格(如 3.4 狀態事件)。
 - **決策（4.2）**：reminder-engine 與 onboarding/StepInstance 解耦(以結構型別 `ScheduledLike` / `ReminderTarget` 接收)，由服務層才接 Prisma StepInstance 與 CalendarService。**理由**：與 3.2/3.3 跨模組解耦一致，引擎可純函式測試。
@@ -253,21 +272,23 @@
 - **決策（6.1）**：kanban 引擎與行事曆解耦(注入 deferralResolver / workdayCounter，同 delay-engine)；可見範圍重用 1.4 AccessScopeService.caseWhere。前端 task-kanban 以前端鏡像型別 + seed 驅動(同 project-gantt)，待 /kanban REST 改 fetch。
 - **決策（7.1）**：Holiday 表由主管維護（GOVERNMENT/COMPANY 來源、HOLIDAY/MAKEUP_WORKDAY 類型，date @unique）；loadCalendar 讀 DB 合併內建範例與呼叫端自訂，補班與假日衝突沿用引擎「假日優先」。
 - **決策（7.1）**：onboarding 排程引擎泛型化 `<S = OnboardingStep>`（buildSchedule/dueReminders/checkpoint 型別），環境建置帶 `EnvironmentStep` 重用；環境 checkpoints 不內建預設位移（§6 未定義、不臆測）。
+- **決策（7.2）**：SMTP dispatcher 與 nodemailer 以 `MailTransport` 介面解耦、收件人 email 以 resolver 注入（接 Prisma User.email）；SMTP env 未設定時優雅降級僅 IN_APP；寄送失敗不落去重日誌→下一輪 cron 自動重試（dedupKey 含 fireIsoDate 故跨日不重送）。詳見「7.2 交付物」。
 
 ## 未完成 / Handoff（下一輪或人類接手）
 1. ✅（3.1）拜訪/會議紀錄 + 成案移交藍圖持久化落地（getHandoff 可取回）。
 2. ✅（3.2）系統導入流程引擎 + 服務落地：接收銷售移交、預定義時間點/提醒、委任權限表簽核把關、**移交工程建立 ENVIRONMENT 案件**。
 3. ✅（3.3）環境建置流程引擎 + 服務落地：依銷售模式分支、接收導入移交、主機採購等待狀態、環境驗收把關→COMPLETED。
-4. **CI 全流程驗證**：3.3~7.1 各純引擎 + spec 已於 sandbox 驗證(tsc --strict + node 測試全綠)；各 `*.service.ts` + controller 以 stub 通過 strict typecheck，惟未在真實 monorepo 跑 `pnpm -r build`(需 generated Prisma client)。**前端 vitest 在 sandbox 觸發 worker bus error 改以等價 harness 全綠，請 review 時在真實環境跑 `pnpm --filter @wfms/web test` 確認**。屬 9.2（#37）範圍。
+4. **CI 全流程驗證**：3.3~7.2 各純引擎 + spec 已於 sandbox 驗證(tsc --strict + node 測試全綠)；各 `*.service.ts` + controller 以 stub 通過 strict typecheck，惟未在真實 monorepo 跑 `pnpm -r build`(需 generated Prisma client；**7.2 新增 @nestjs/schedule / nodemailer 相依，請先 pnpm install**)。**前端 vitest 在 sandbox 觸發 worker bus error 改以等價 harness 全綠，請 review 時在真實環境跑 `pnpm --filter @wfms/web test` 確認**。屬 9.2（#37）範圍。
 5. ✅（3.4）客製化（需求變更）流程引擎 + 服務落地。
 6. ✅（4.1→7.1）曆法遞延引擎 + CalendarService 已落地；**7.1 已完成**：假日來源持久化（Holiday 表，主管維護）＋ onboarding/environment service 實際呼叫 `CalendarService.buildIsExcluded()` 注入 buildSchedule（identity 已取代）；遞延模式定案 NEXT_WORKDAY。
-7. ✅（4.2）提醒與通知引擎 + ReminderService 已落地。**仍待**：(a) **Email(SMTP) dispatcher + 每日定時(cron)派送**（7.2 #32，下一個可動工）；(b) 提醒規則是否需可由設計器設定；(c) StepInstance.dueDate 來源——需與流程推進/專案管理實際寫入後，提醒才有資料。
+7. ✅（4.2→7.2）提醒與通知引擎 + ReminderService + **Email(SMTP) dispatcher 與每日 cron（7.2 #32）**皆已落地。**仍待**：(a) 提醒規則是否需可由設計器設定；(b) StepInstance.dueDate 來源——需與流程推進/專案管理實際寫入後，提醒才有資料；(c) 真實 SMTP 環境寄送驗證（env 設定後，9.2 一併確認）。
 8. ✅（5.1~5.6）專案管理引擎 + 服務 + 前端甘特/簡報/雙向導覽皆落地。**仍待**：§9-6 排除日落入流程區間自動順延 planEnd、§9-5 全專案 vs 特定流程、§9-1 進度認定方式定案。
-9. **REST controller / 前端 UI**：sales/onboarding/environment/customization/calendar/reminders/projects 後端 REST controller 仍未提供（8.1 #33）。**已提供**：auth(既有)、kanban(6.1 GET /kanban)、iso-trail(6.2)。**前端**：workflow-designer(2.2)、project-gantt(5.5/5.6)、task-kanban(6.1) 皆已就緒(seed 驅動，待 REST 改 fetch，8.2 #34)；ISO 稽核查閱頁屬 8.3 #35。
+9. **REST controller / 前端 UI**：sales/onboarding/environment/customization/calendar/reminders/projects 後端 REST controller 仍未提供（8.1 #33，**下一個可動工**）。**已提供**：auth(既有)、kanban(6.1 GET /kanban)、iso-trail(6.2)。**前端**：workflow-designer(2.2)、project-gantt(5.5/5.6)、task-kanban(6.1) 皆已就緒(seed 驅動，待 REST 改 fetch，8.2 #34)；ISO 稽核查閱頁屬 8.3 #35。
 10. **服務層整合測試**：各 service 目前僅引擎層純函式測試＋stub 接線測試覆蓋；真實 DB 行為屬 9.1（#36）。
 11. ✅（6.1）任務看板已落地。**仍待**：(a) 待填表單數 `pendingRequiredForms` 接 FormsModule 統計(目前 0)；(b) 前端改接 /kanban REST 並把 `onOpenCase` 串到實際案件詳情頁（8.2 #34）；(c) ✅ 假日來源——7.1 已改 `loadCalendar` 由 DB Holiday 表驅動。
-12. **（2026-06-07 review 新增）**：(a) ✅ **7.1 完成**——Holiday 資料表＋CalendarService DB 化＋buildSchedule 注入；(b) **7.2（#32）提醒每日定時寄送 Email(SMTP)**：實作 SMTP `ReminderDispatcher`(host/port/帳密由 env)、以排程器(建議 @nestjs/schedule cron)每日掃描各案件 `dispatchDueReminders`——**下一個可動工**。
+12. **（2026-06-07 review 新增）**：(a) ✅ **7.1 完成**——Holiday 資料表＋CalendarService DB 化＋buildSchedule 注入；(b) ✅ **7.2 完成（2026-06-07）**——SMTP `ReminderDispatcher`＋@nestjs/schedule 每日 cron 落地（SMTP_HOST 等 env 設定後啟用 EMAIL；REMINDER_CRON 可調，預設每日 08:00），詳見「7.2 交付物」。
 13. **（7.1 註記）**：Holiday CRUD 目前僅 Service 層；REST 端點（主管維護 UI 用）併入 8.1 calendar controller 補齊。環境建置排程 checkpoints 位移值待部門預定義（§12-3/§12-4 相關）。
+14. **（7.2 註記）**：部署需設定 env：`SMTP_HOST`（必）、`SMTP_PORT`(預設 587)、`SMTP_SECURE`、`SMTP_USER`/`SMTP_PASS`、`SMTP_FROM`、`REMINDER_CRON`(預設 `0 8 * * *`)；帳密以 secret 管理勿入 repo。Email HTML 版型、收件人偏好設定（退訂/管道選擇）屬後續 UI 任務。
 
 ## 待釐清（沿用，需求 §12 / 專案管理模組規格 §9）
 - §12-1 跨角色移交是否需主管核可、流程一律由特定角色發起 → 設計器已留「觸發角色＋條件」欄位，實際核可關卡待釐清（3.4 指派鏈已留 roleMatches 回報、未強制）。
@@ -275,7 +296,7 @@
 - §12-3 各表單實際欄位（報價單/客製需求/委任權限表/人員資料表/環境建置檢核表等）→ 目前僅以 code 標識容器、data 承載 JSON。
 - §12-4 各表單簽核關卡與層級 → 影響環境驗收/客製化複測是否需簽核（3.3/3.4 目前未強制，保留簽核集合介面）。
 - §12-5 行事曆遞延規則 → **已定案：順延下一工作日(NEXT_WORKDAY)**；**假日來源：✅ 7.1 已落地 Holiday 資料表（主管維護），loadCalendar 讀 DB 合併，onboarding/environment/kanban 皆已串接**。
-- §12-7 提醒管道 → **已定案：先以每日定時寄送 Email(SMTP)**（7.2 #32 排程中）；系統內 IN_APP 已落地。
+- §12-7 提醒管道 → **已定案：先以每日定時寄送 Email(SMTP)**；**✅ 7.2 已落地：SMTP dispatcher＋每日 cron，與 IN_APP 並存**。
 - §12-10 附件/範本實體儲存於系統或改以 SharePoint/OneDrive 連結為主、允許檔案類型與大小上限 → 影響 2.4/2.5 上傳實作，待主管確認。
 - 專案管理模組規格 §9-1 進度認定方式（步驟比例/加權工時/人工填報）→ **5.1 先以步驟完成比例為預設並保留 progress 可人工覆寫，待主管定案**。
 - 專案管理模組規格 §9-2/§9-3/§9-6 容許門檻 T、預期進度日曆日或工作日基準、排除日順延規則 → 5.2/5.3/5.4 已實作可設定介面，預設值/planEnd 自動順延待主管定案。
