@@ -2,15 +2,23 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { CaseStatus, FlowType, SaleMode, SubmissionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { SalesService } from '../sales/sales.service';
+import { CalendarService } from '../calendar/calendar.service';
+import { HolidayCalendarInput } from '../calendar/calendar-engine';
 import {
   AUTH_DELEGATION_FORM_CODE,
+  DEFAULT_ONBOARDING_CHECKPOINTS,
   EngineeringHandoffInput,
   EnvironmentCaseBlueprint,
   FormStatusLike,
   ONBOARDING_HANDOFF_FORM_CODE,
+  OnboardingCheckpointDef,
   OnboardingIntake,
   OnboardingStep,
+  ReminderItem,
+  ScheduledCheckpoint,
+  buildSchedule,
   deserializeEnvironmentBlueprint,
+  dueReminders,
   intakeFromSalesHandoff,
   planEngineeringHandoff,
   serializeEnvironmentBlueprint,
@@ -22,6 +30,9 @@ import {
  * 對應需求規格 §5「系統導入流程（顧問）」，落實範圍（依現有 schema）：
  * - receiveFromSales / createOnboardingCase：接收銷售移交、建立 ONBOARDING 案件並落地 intake。
  *   對應 §5.2 步驟1、§4.6「成案產出自動帶往導入」。
+ * - buildCaseSchedule / getDueReminders：預定義時間點排程與主動提醒（§5.1、§5.3），
+ *   自 7.1 起 isExcluded 由 CalendarService.buildIsExcluded() 注入（DB Holiday 假日 +
+ *   週末 / 補班 + 專案排除日），計畫日落非工作日時自動遞延（§8.3、§12-5 NEXT_WORKDAY）。
  * - submitOnboardingForm / signOnboardingForm / getFormStatuses：各時間點表單填寫與
  *   委任權限表簽核（append-only），對應 §5.2 步驟4、§5.3。
  * - handoffToEngineering：啟動會議完成且必填 / 簽核齊備後，建立後續 ENVIRONMENT（環境建置）
@@ -31,7 +42,7 @@ import {
  * 以固定 code 的 FormDefinition 作為容器（resolve-or-create），本輪不新增 migration。
  *
  * 注意（待後續 / 人類 review，見 issue handoff）：
- * - 提醒（dueReminders）之實際派送（系統內 / Email）待 4.2；曆法遞延（isExcluded）待 4.1。
+ * - 提醒（dueReminders）之實際派送（系統內 / Email）由 4.2 ReminderService 承接。
  * - ENVIRONMENT 流程定義（WorkflowDefinition）由 6.x 設計，handoffToEngineering 需呼叫端提供
  *   既有 envWorkflowId 作為新案件所屬流程。
  */
@@ -40,6 +51,7 @@ export class OnboardingService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly sales: SalesService,
+    private readonly calendar: CalendarService,
   ) {}
 
   /** 解析（或首次建立）某 code 的專用表單定義容器。 */
@@ -59,6 +71,57 @@ export class OnboardingService {
       data: { code, name, description, isSignable },
       select: { id: true },
     });
+  }
+
+  /* ────────────── 排程與提醒（§5.1 / §5.3；遞延由 DB 假日驅動，7.1） ────────────── */
+
+  /**
+   * 建立導入排程（§5.1 預定義時間點）。
+   *
+   * isExcluded 實際注入 `CalendarService.buildIsExcluded()`：DB `Holiday` 假日（主管維護，
+   * 含連假 / 補班）+ 週末 + 專案排除日（提供 projectId 時），取代先前的 identity 預設——
+   * 計畫日落非工作日 / 排除日時向後遞延至第一個工作日（§8.3、§12-5 NEXT_WORKDAY）。
+   */
+  async buildCaseSchedule(
+    anchor: Date,
+    opts: {
+      /** 自訂時間點骨架；未提供時用內建 DEFAULT_ONBOARDING_CHECKPOINTS（§5.1 可預定義）。 */
+      checkpoints?: readonly OnboardingCheckpointDef[];
+      /** 關聯專案 id：提供時一併套用該專案行事曆排除日（§10.5）。 */
+      projectId?: string;
+      /** 額外自訂假日 / 補班 / 週末設定（疊加於 DB 假日之上）。 */
+      custom?: HolidayCalendarInput;
+    } = {},
+  ): Promise<ScheduledCheckpoint[]> {
+    const isExcluded = await this.calendar.buildIsExcluded({
+      projectId: opts.projectId,
+      custom: opts.custom,
+    });
+    return buildSchedule(anchor, opts.checkpoints ?? DEFAULT_ONBOARDING_CHECKPOINTS, isExcluded);
+  }
+
+  /**
+   * 依「現在」取得應主動提醒之時間點（§5.3）。排程先經 buildCaseSchedule（已套用 DB 假日 /
+   * 專案排除日遞延），故假日遞延後提醒時點自動同步（與 4.2 提醒引擎之精神一致）。
+   */
+  async getDueReminders(
+    anchor: Date,
+    opts: {
+      checkpoints?: readonly OnboardingCheckpointDef[];
+      projectId?: string;
+      custom?: HolidayCalendarInput;
+      now?: Date;
+      lookaheadDays?: number;
+      completedSteps?: ReadonlySet<OnboardingStep>;
+    } = {},
+  ): Promise<ReminderItem[]> {
+    const schedule = await this.buildCaseSchedule(anchor, opts);
+    return dueReminders(
+      schedule,
+      opts.now ?? new Date(),
+      opts.lookaheadDays ?? 3,
+      opts.completedSteps ?? new Set<OnboardingStep>(),
+    );
   }
 
   /**
