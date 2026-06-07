@@ -171,9 +171,13 @@ export function intakeFromSalesHandoff(handoff: SalesHandoffLike): OnboardingInt
 
 /* ────────────────── 導入排程與提醒（§5.1 預定義時間點、§5.3 主動提醒） ────────────────── */
 
-/** 預定義時間點（相對於計畫錨點的天數位移與應完成表單）。 */
-export interface OnboardingCheckpointDef {
-  step: OnboardingStep;
+/**
+ * 預定義時間點（相對於計畫錨點的天數位移與應完成表單）。
+ * 泛型 S＝步驟識別型別：預設為導入 OnboardingStep；其他流程（如環境建置 EnvironmentStep）
+ * 可帶入自身步驟列舉重用同一套排程 / 遞延邏輯（7.1）。
+ */
+export interface OnboardingCheckpointDef<S = OnboardingStep> {
+  step: S;
   label: string;
   /** 相對錨點的天數位移（>= 0）。 */
   offsetDays: number;
@@ -182,8 +186,8 @@ export interface OnboardingCheckpointDef {
 }
 
 /** 已排定（含絕對日期）的時間點。 */
-export interface ScheduledCheckpoint {
-  step: OnboardingStep;
+export interface ScheduledCheckpoint<S = OnboardingStep> {
+  step: S;
   label: string;
   offsetDays: number;
   formCodes: string[];
@@ -213,17 +217,19 @@ function addDays(base: Date, days: number): Date {
  * - anchor 必填且需為合法日期。
  * - offsetDays 需為非負整數。
  * - 可選 isExcluded(date)：若該日為排除日 / 假日則向後遞延至第一個非排除日（§5.3、§8.3）。
- *   實際曆法來源待 4.1；預設不遞延（identity）。回傳依 plannedDate 由早到晚排序。
+ *   服務層（OnboardingService.buildCaseSchedule / EnvironmentService.buildEnvironmentSchedule）
+ *   會以 CalendarService.buildIsExcluded() 注入「DB Holiday 假日 + 週末 / 補班 + 專案排除日」（7.1）；
+ *   單獨呼叫本函式時預設不遞延（identity）。回傳依 plannedDate 由早到晚排序。
  */
-export function buildSchedule(
+export function buildSchedule<S = OnboardingStep>(
   anchor: Date,
-  checkpoints: readonly OnboardingCheckpointDef[] = DEFAULT_ONBOARDING_CHECKPOINTS,
+  checkpoints: readonly OnboardingCheckpointDef<S>[] = DEFAULT_ONBOARDING_CHECKPOINTS as unknown as readonly OnboardingCheckpointDef<S>[],
   isExcluded: (date: Date) => boolean = () => false,
-): ScheduledCheckpoint[] {
+): ScheduledCheckpoint<S>[] {
   if (!(anchor instanceof Date) || Number.isNaN(anchor.getTime())) {
     throw new OnboardingEngineError('plan_anchor_required');
   }
-  const out: ScheduledCheckpoint[] = [];
+  const out: ScheduledCheckpoint<S>[] = [];
   for (const c of checkpoints) {
     if (!Number.isInteger(c.offsetDays) || c.offsetDays < 0) {
       throw new OnboardingEngineError('checkpoint_offset_invalid');
@@ -246,8 +252,8 @@ export function buildSchedule(
 }
 
 /** 提醒項目（§5.3 主動提醒）。 */
-export interface ReminderItem {
-  step: OnboardingStep;
+export interface ReminderItem<S = OnboardingStep> {
+  step: S;
   label: string;
   plannedDate: Date;
   formCodes: string[];
@@ -263,14 +269,14 @@ export interface ReminderItem {
  * - 納入：已逾期（plannedDate < now）或在 lookaheadDays 內即將到期者。
  * 回傳依計畫日由早到晚排序，供主動提醒負責人。
  */
-export function dueReminders(
-  schedule: readonly ScheduledCheckpoint[],
+export function dueReminders<S = OnboardingStep>(
+  schedule: readonly ScheduledCheckpoint<S>[],
   now: Date = new Date(),
   lookaheadDays = 3,
-  completedSteps: ReadonlySet<OnboardingStep> = new Set(),
-): ReminderItem[] {
+  completedSteps: ReadonlySet<S> = new Set<S>(),
+): ReminderItem<S>[] {
   const horizon = addDays(now, lookaheadDays);
-  const items: ReminderItem[] = [];
+  const items: ReminderItem<S>[] = [];
   for (const c of schedule) {
     if (completedSteps.has(c.step)) continue;
     if (c.plannedDate.getTime() > horizon.getTime()) continue;

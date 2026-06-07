@@ -2,11 +2,19 @@ import { Injectable, NotFoundException } from '@nestjs/common';
 import { CaseStatus, FlowType, SubmissionStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { OnboardingService } from '../onboarding/onboarding.service';
+import { CalendarService } from '../calendar/calendar.service';
+import { HolidayCalendarInput } from '../calendar/calendar-engine';
+import {
+  OnboardingCheckpointDef,
+  ScheduledCheckpoint,
+  buildSchedule,
+} from '../onboarding/onboarding-engine';
 import {
   ENV_HOST_PROCUREMENT_FORM_CODE,
   ENVIRONMENT_INTAKE_FORM_CODE,
   EnvironmentAcceptanceResult,
   EnvironmentIntake,
+  EnvironmentStep,
   FormStatusLike,
   HostReadiness,
   deserializeEnvironmentIntake,
@@ -22,6 +30,9 @@ import {
  * 對應需求規格 §6「環境建置流程（工程師）」，落實範圍（依現有 schema）：
  * - receiveFromOnboarding：自導入案件取回移交藍圖（onboarding.getEngineeringHandoff），
  *   轉為環境建置接收並 append-only 落地於 ENVIRONMENT 案件。對應 §6.2 步驟1、§3。
+ * - buildEnvironmentSchedule：環境建置時間點排程，isExcluded 由
+ *   CalendarService.buildIsExcluded() 注入（DB Holiday 假日 + 週末 / 補班 + 專案排除日），
+ *   計畫日落非工作日時自動遞延（7.1、§8.3）。
  * - recordHostProcurement / getHostReadiness：買斷制「等待客戶採購主機」狀態記錄與就緒判斷，
  *   未採購時把案件標為 ON_HOLD（等待），採購後回到 IN_PROGRESS。對應 §6.3。
  * - submitEnvironmentForm / getFormStatuses：分支建置產出（建置檢核表 / 租戶開立紀錄）與
@@ -43,6 +54,7 @@ export class EnvironmentService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly onboarding: OnboardingService,
+    private readonly calendar: CalendarService,
   ) {}
 
   /** 解析（或首次建立）某 code 的專用表單定義容器。 */
@@ -62,6 +74,33 @@ export class EnvironmentService {
       data: { code, name, description, isSignable },
       select: { id: true },
     });
+  }
+
+  /* ────────────── 排程（時間點遞延由 DB 假日驅動，7.1） ────────────── */
+
+  /**
+   * 建立環境建置排程：依錨點 + 各時間點位移算出絕對計畫日，並套用
+   * `CalendarService.buildIsExcluded()`（DB `Holiday` 假日 + 週末 / 補班 + 專案排除日）遞延
+   * ——取代先前的 identity 預設（7.1、§8.3、§12-5 NEXT_WORKDAY）。
+   *
+   * 與導入流程不同，§6 未內建預設時間點位移（屬部門預定義 / §12 待釐清），
+   * 故 checkpoints 由呼叫端（流程定義 / 設計器）提供，步驟識別用 EnvironmentStep。
+   */
+  async buildEnvironmentSchedule(
+    anchor: Date,
+    checkpoints: readonly OnboardingCheckpointDef<EnvironmentStep>[],
+    opts: {
+      /** 關聯專案 id：提供時一併套用該專案行事曆排除日（§10.5）。 */
+      projectId?: string;
+      /** 額外自訂假日 / 補班 / 週末設定（疊加於 DB 假日之上）。 */
+      custom?: HolidayCalendarInput;
+    } = {},
+  ): Promise<ScheduledCheckpoint<EnvironmentStep>[]> {
+    const isExcluded = await this.calendar.buildIsExcluded({
+      projectId: opts.projectId,
+      custom: opts.custom,
+    });
+    return buildSchedule(anchor, checkpoints, isExcluded);
   }
 
   /**
