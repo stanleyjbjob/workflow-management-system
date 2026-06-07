@@ -69,3 +69,42 @@ jobs:
 
       - name: Seed example data
         run: pnpm --filter @wfms/api run db:seed
+
+  # 9.1：服務層整合測試（真實 Postgres）。
+  # 與 migration-check 相同的 service 模式：乾淨 DB → migrate deploy → 跑 *.int-spec.ts。
+  # 獨立 job，避免 DB 相依測試拖慢/污染純單元測試流程。
+  integration-test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: wfms
+          POSTGRES_PASSWORD: wfms
+          POSTGRES_DB: wfms_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U wfms"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://wfms:wfms@localhost:5432/wfms_test?schema=public
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Apply migrations (prisma migrate deploy)
+        run: pnpm --filter @wfms/api exec prisma migrate deploy
+
+      - name: Integration tests (real DB)
+        run: pnpm --filter @wfms/api run test:integration
