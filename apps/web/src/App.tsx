@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { WorkflowDesigner } from './features/workflow-designer';
 import { ProjectWorkspace } from './features/project-gantt';
 import { TaskKanbanPage } from './features/task-kanban';
+import { IsoTrailPage } from './features/iso-trail';
 import { API_BASE } from './lib/api';
 
-type Tab = 'status' | 'designer' | 'kanban' | 'project';
+type Tab = 'status' | 'designer' | 'kanban' | 'project' | 'iso';
 
 export function App(): JSX.Element {
   const [tab, setTab] = useState<Tab>('designer');
@@ -42,12 +43,14 @@ export function App(): JSX.Element {
         {tabBtn('designer', '流程定義設計器')}
         {tabBtn('kanban', '任務看板')}
         {tabBtn('project', '專案進度')}
+        {tabBtn('iso', '稽核軌跡')}
         {tabBtn('status', '系統狀態')}
       </nav>
 
       {tab === 'designer' && <WorkflowDesigner />}
       {tab === 'kanban' && <TaskKanbanPage />}
       {tab === 'project' && <ProjectWorkspace />}
+      {tab === 'iso' && <IsoTrailPage />}
       {tab === 'status' && (
         <section>
           <p>API 健康狀態：<strong>{apiStatus}</strong></p>
