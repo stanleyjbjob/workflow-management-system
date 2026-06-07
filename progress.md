@@ -10,7 +10,7 @@
 - 授權：RBAC（於 1.4 定案）。
 - 前端：**Vite + React 18 + TypeScript**（apps/web）；測試 **vitest**（於 2.2 引入）。
 - 後端測試：**jest + ts-jest**（apps/api）。
-- CI：`.github/workflows/ci.yml` — pnpm install（`--frozen-lockfile=false`）→ `pnpm -r build` → `pnpm -r test`。
+- CI：`.github/workflows/ci.yml` — pnpm install（`--frozen-lockfile=false`）→ `pnpm -r build` → `pnpm -r test`；**7.1 新增 migration-check job（Postgres service + `prisma migrate deploy` + seed）**。
 
 ## 各 issue 狀態
 | WBS | Issue | 狀態 | 備註 |
@@ -36,8 +36,28 @@
 | 5.4 | #26 專案行事曆排除日 | ✅ done | 排除日 CRUD（ExclusionService: add/list/update/removeExclusion）+ 純引擎驗證（exclusion-engine: from<=to/reason 必填/source 限 CUSTOMER·INTERNAL/UTC 日界，含 isDateExcluded·exclusionCalendarDays）+ 時程避讓（deferDateAvoidingExclusions·rescheduleWithExclusions 委派 4.1 CalendarService，排除日與假日併行）；甘特圖網底沿用 5.2 gantt-engine 讀同一張 Exclusion 表。**引擎+服務 spec 共 35 案於 sandbox(tsc --strict node16 + 自製 jest-runner) 全綠**；驗收要點達成（甘特即時呈現 by 5.2、時程避開 by CalendarService 委派）。§9-5（全專案 vs 特定流程）、§9-6（planEnd 自動順延規則）屬待釐清業務規則、非本 issue 驗收阻擋項，刻意未臆測 planEnd 自動順延，待人類定案後再開 follow-up |
 | 5.5 | #27 簡報模式 | ✅ done | **apps/web 新增前端 feature `project-gantt`**：`presentation.ts` 簡報模式純邏輯(ViewMode 切換/derivePresentationLayout 版面推導/presentationKeydown F·P·Esc 鍵盤/statusMeta 五態繁中標籤+色/buildKpiCards·selectKpiCards/presentationHeadline 摘要、**所有函式純讀取不變動資料**)、**39 案測試**(presentation.test.ts vitest；sandbox 因 vitest worker bus error 改以自製 harness 全綠 PASS=39，source tsc --strict + --noUnusedLocals/Parameters 通過)；`ProjectGanttView.tsx` 甘特呈現(月份刻度/流程長條+完成填色/今日線/排除日網底/KPI)與一鍵簡報模式(隱藏側欄與次要 chrome、放大時間軸與重點 KPI、fixed 沉浸覆蓋層 + best-effort Fullscreen API)；`types.ts`(GanttView 前端鏡像)、`seed.ts`(REST 未就緒前示範資料)、`styles.ts`、`index.ts`；App.tsx 新增「專案進度」分頁。**資料源為 seed 範例**(REST 層尚未提供)，待 API 就緒改 fetch 即可 |
 | 5.6 | #28 專案↔案件雙向導覽 | ✅ done | 詳見既有 commit（gantt rows 透傳 caseId、getProjectDetail 回傳步驟、前端列帶 caseId） |
-| 6.1 | #29 任務看板與待辦 | ✅ done | apps/api `kanban/` 純引擎(分欄 待辦/進行中/即將到期/已完成、到期·逾期·受連假遞延標示、KPI 待處理/即將到期/逾期/遞延、角色/承辦人/流程過濾)、**47 案測試**(sandbox 全綠 + tsc --strict 通過)；**即將到期欄含逾期任務、視窗以工作日計**(依 review 決策)；KanbanService(getBoard：AccessScope 收斂可見範圍 + CalendarService 工作日視窗/遞延)；**KanbanController GET /kanban**(role/assignee/flowType/onlyMine/upcomingWithinDays，SessionAuthGuard+PermissionsGuard('case:read'))；app.module 註冊 KanbanModule。**apps/web `task-kanban` 前端看板頁**(四欄+KPI+標記+角色/流程過濾+點卡開案件側欄，board-view.ts 10 案測試)；App.tsx 新增「任務看板」分頁(seed 驅動，待 /kanban REST 改 fetch)。待後續：待填表單數統計、前端接 REST、CI build |
-| 6.2 | #30 ISO 27001 文件化軌跡 | 待辦 | 依 WBS 順序（下一個可動工） |
+| 6.1 | #29 任務看板與待辦 | ✅ done | apps/api `kanban/` 純引擎+KanbanService+KanbanController(GET /kanban)+apps/web task-kanban 前端看板頁；47+10 案測試。**7.1 起 getBoard 改用 loadCalendar（DB 假日驅動遞延標示）** |
+| 6.2 | #30 ISO 27001 文件化軌跡 | ✅ done | 後端 iso-trail 引擎+IsoTrailService+REST（GET /iso-trail、/summary、/export、/export.csv）、37 案引擎測試；前端查閱頁屬 8.3（#35） |
+| 7.1 | #31 Holiday 假日資料表與行事曆 DB 化 | ✅ done | **首次正式 migration**：Holiday 表+seed+CRUD、CalendarService.loadCalendar 讀 DB、kanban 遞延 DB 驅動、CI migration-check job；**onboarding/environment buildSchedule 已注入 buildIsExcluded（identity 取代完成）**。詳見「7.1 交付物」 |
+| 7.2 | #32 提醒 Email(SMTP) 寄送與每日定時排程 | 待辦 | 下一個可動工 |
+| 8.1~10.1 | #33~#38 | 待辦 | REST 補齊/前端串接/ISO 前端/整合測試/CI 全流程/規則定案 |
+
+## 7.1 交付物（#31，Holiday 假日資料表與行事曆 DB 化，§8.3 / §12-5）
+- **上一輪（2026-06-06）**：
+  - Prisma：新增 `Holiday` model（date @unique、name、type=HolidayType(HOLIDAY/MAKEUP_WORKDAY)、source=HolidaySource(GOVERNMENT/COMPANY)、note）＋**首次正式 migration**；seed 建立 2026 台灣假日與補班範例。
+  - `CalendarService`：新增 `loadCalendar()` 讀 Holiday 表合併「內建範例固定日＋呼叫端自訂」；`buildIsExcluded`/`deferToWorkday`/`nextWorkday`/`reschedule` 改 async DB 驅動；Holiday CRUD（listHolidays/addHoliday/updateHoliday/removeHoliday，主管維護；重複日期→`holiday_date_duplicate`、非法日期→`holiday_date_invalid`）；`holidayRowsToCalendarInput` 純函式＋單元測試。同步保留同步版 `buildCalendar()` 供無 DB 兜底。
+  - `KanbanService.getBoard` 改用 `loadCalendar`：看板遞延標示由 DB 假日驅動（6.1 驗收同步生效）。
+  - CI：新增 **migration-check job**（Postgres service + `prisma migrate deploy` + seed）。
+- **本輪（2026-06-07，收尾）**：onboarding/environment 服務層**實際注入** `CalendarService.buildIsExcluded()`，移除 buildSchedule 的 identity 預設依賴：
+  - `onboarding-engine`：`OnboardingCheckpointDef`/`ScheduledCheckpoint`/`ReminderItem`/`buildSchedule`/`dueReminders` **泛型化 `<S = OnboardingStep>`**（預設型參、完全向下相容），使環境建置可帶 `EnvironmentStep` 重用同一套排程/遞延邏輯。
+  - `OnboardingService.buildCaseSchedule(anchor, {checkpoints?, projectId?, custom?})` 與 `getDueReminders(...)`：isExcluded 由 buildIsExcluded 注入（DB 假日＋週末/補班＋專案排除日 §10.5），計畫日落非工作日自動遞延（§12-5 NEXT_WORKDAY）；提醒由遞延後排程推導、自動同步。
+  - `EnvironmentService.buildEnvironmentSchedule(anchor, checkpoints, {projectId?, custom?})`：同上注入；§6 未內建預設時間點位移（屬部門預定義/§12 待釐清），checkpoints 由呼叫端提供、**不臆測位移**。
+  - `OnboardingModule`/`EnvironmentModule` imports 加入 `CalendarModule`。
+  - 新增 `onboarding-schedule.service.spec.ts`（服務層接線測試：遞延套用、opts 透傳、提醒同步；CalendarService stub）。sandbox 驗證：tsc --strict（experimentalDecorators）＋ 42 案斷言全綠（含引擎迴歸抽查）。
+  - commit：`099d8a7`（onboarding service+module）、`419df15`（engine 泛型化）、`34a55f3`（environment service+module+spec）。
+- **決策（7.1 本輪）**：排程引擎泛型化而非為 environment 另寫排程器。**理由**：單一 buildSchedule 遞延邏輯、預設型參使既有呼叫端零改動；避免重複曆法實作。
+- **決策（7.1 本輪）**：環境建置 checkpoints 不內建預設位移（由呼叫端/流程定義提供）。**理由**：§6 未定義時間點位移，屬業務規則不臆測（與 3.3 風格一致）。
+- **驗收對照**：(1) migration CI 乾淨套用＋seed → migration-check job 已就緒（真實 CI 全綠最終確認歸 9.2 #37）；(2) 行事曆遞延由 DB 假日驅動＋6.1 看板同步 → 上一輪完成；(3) buildSchedule 實際套用假日排除 → 本輪完成。
 
 ## 6.1 交付物（#29，任務看板與待辦，§8）
 - `apps/api/src/kanban/`：後端「任務看板與待辦」模組（對應需求規格 §8、原型「流程看板/待辦」）。
@@ -49,7 +69,7 @@
     - 過濾 `matchesFilter`/`roleMatches`/`isMine`：依角色/承辦人/流程型別/僅與我相關；主管綜覽全部。
     - KPI `summarizeKpi`：待處理/即將到期/逾期/遞延(即將到期與逾期各自獨立計)。`buildBoard` 產出 `{ order, columns, kpi, total, activeTotal }`，SKIPPED/RETURNED 不上看板。
   - `kanban-engine.spec.ts`：jest 單元測試 **47 項**（sandbox node 全綠 + tsc --strict 通過）。
-  - `kanban.service.ts`：`KanbanService.getBoard(user, filter?, options?)`：以 `AccessScopeService.caseWhere` 收斂可見範圍(§8.5)、讀 StepInstance(含 Case / StepDefinition.responsibleRole)、以 `CalendarService` 建同一份行事曆驅動「工作日視窗(businessDaysBetween)」與「遞延標示(到期日落非工作日→遞延，天數＝到下一工作日曆日差)」餵入引擎。
+  - `kanban.service.ts`：`KanbanService.getBoard(user, filter?, options?)`：以 `AccessScopeService.caseWhere` 收斂可見範圍(§8.5)、讀 StepInstance(含 Case / StepDefinition.responsibleRole)、以 `CalendarService` 建同一份行事曆驅動「工作日視窗(businessDaysBetween)」與「遞延標示(到期日落非工作日→遞延，天數＝到下一工作日曆日差)」餵入引擎。**7.1 起改用 loadCalendar（DB 假日驅動）**。
   - `kanban.controller.ts`：`GET /kanban?role=&assignee=&flowType=&onlyMine=&upcomingWithinDays=`，`@UseGuards(SessionAuthGuard, PermissionsGuard)` + `@Permissions('case:read')` + `@CurrentUser`；每卡回傳 caseId/caseCode 供前端開案件。
   - `kanban.module.ts`(imports PrismaModule + RbacModule + CalendarModule + AuthModule、controllers KanbanController) / `index.ts`。controller+service+module 以 stub 通過 tsc --strict。
 - `apps/api/src/app.module.ts`：註冊 `KanbanModule`。
@@ -131,8 +151,8 @@
     - 表單齊備/驗收把關（§6.2 步驟2/3）：`unmetForms`、`planAcceptance`（買斷需主機已採購否則 `host_purchase_pending`、分支建置表單齊備否則 `branch_forms_incomplete`、驗收表完成否則 `acceptance_incomplete`）。
     - 接收藍圖持久化序列化：`ENVIRONMENT_INTAKE_FORM_CODE`、`serialize/deserializeEnvironmentIntake`（毀損拋 `intake_corrupt`）。
   - `environment-engine.spec.ts`：jest 單元測試 **55 項**（sandbox node 驗證全綠、tsc --strict 通過）。
-  - `environment.service.ts`：`EnvironmentService`（Prisma + OnboardingService）：receiveFromOnboarding / recordHostProcurement(+等待狀態 ON_HOLD) / getHostReadiness / submitEnvironmentForm / getFormStatuses / completeEnvironment(→COMPLETED)。
-  - `environment.module.ts` / `index.ts`：`EnvironmentModule`（imports PrismaModule + OnboardingModule）。
+  - `environment.service.ts`：`EnvironmentService`（Prisma + OnboardingService + **CalendarService（7.1 起）**）：receiveFromOnboarding / recordHostProcurement(+等待狀態 ON_HOLD) / getHostReadiness / submitEnvironmentForm / getFormStatuses / completeEnvironment(→COMPLETED) / **buildEnvironmentSchedule（7.1，DB 假日遞延）**。
+  - `environment.module.ts` / `index.ts`：`EnvironmentModule`（imports PrismaModule + OnboardingModule + **CalendarModule**）。
 - `apps/api/src/app.module.ts`：註冊 `EnvironmentModule`。
 
 ## 3.4 交付物（#20，客製化（需求變更）流程，§7）
@@ -156,12 +176,12 @@
     - 日期工具：`toIsoDate`/`parseIsoDate`(拒絕格式錯誤與溢位日如 2026-02-30)/`addDays`/`calendarDaysBetween`/`weekdayOf`。
     - 行事曆：`HolidayCalendarInput`→`buildCalendar`(假日/補班/可自訂週末；補班與假日衝突時**假日優先**)、`mergeCalendars`。
     - 工作日判斷：`isWeekend`/`isHoliday`/`isMakeupWorkday`/`isWorkday`(補班→工作日；假日/週末→非工作日)/`isNonWorkday`。
-    - 注入點：`buildExcludedPredicate(cal, extraExcluded?)`→`isExcluded(date)=>boolean`，可直接餵給 onboarding `buildSchedule`(該函式早已預留此參數，曆法來源待 4.1)。
+    - 注入點：`buildExcludedPredicate(cal, extraExcluded?)`→`isExcluded(date)=>boolean`，**7.1 起由 OnboardingService/EnvironmentService 實際注入 buildSchedule**。
     - 遞延/工作日運算：`deferToWorkday`(連假整段順延，全為假日拋 `calendar_no_workday` 守門 366 天)/`nextWorkday`/`previousWorkday`/`addBusinessDays`(含負數)/`businessDaysBetween`。
     - 時程重算：`reschedule(anchor, checkpoints, cal, mode, extraExcluded?)`→`RescheduledCheckpoint[]`(原始日/計畫日/遞延天數，依計畫日排序)。**兩種模式**：`DeferralMode.NEXT_WORKDAY`(順延下一工作日，各點獨立)、`DeferralMode.PUSH_FORWARD`(整體後推，位移以工作日計)；預設 NEXT_WORKDAY。
-    - 範例假日：`SAMPLE_TW_FIXED_HOLIDAYS_2026`(僅西曆固定日，農曆連假/補班需由來源校正)。
+    - 範例假日：`SAMPLE_TW_FIXED_HOLIDAYS_2026`(僅西曆固定日，農曆連假/補班由 **Holiday 表（7.1）** 校正)。
   - `calendar-engine.spec.ts`：jest 單元測試。**沙箱以 node --experimental-transform-types 跑 45 項斷言全綠、tsc --strict 通過**。
-  - `calendar.service.ts`：`CalendarService`(Prisma)：buildCalendar(合併範例+自訂)/getProjectExclusionPredicate(讀 Exclusion 區間→predicate)/buildIsExcluded(假日+專案排除日合成)/deferToWorkday/nextWorkday/reschedule。
+  - `calendar.service.ts`：`CalendarService`(Prisma)：**loadCalendar（7.1，讀 Holiday 表合併）**/buildCalendar(同步兜底)/getProjectExclusionPredicate(讀 Exclusion 區間→predicate)/buildIsExcluded(DB 假日+專案排除日合成)/deferToWorkday/nextWorkday/reschedule（皆 DB 驅動）/**Holiday CRUD（7.1）**。
   - `calendar.module.ts` / `index.ts`：`CalendarModule`(imports PrismaModule)。
 - `apps/api/src/app.module.ts`：註冊 `CalendarModule`。
 
@@ -190,7 +210,7 @@
   - 驗證/正規化：`buildExclusionDraft`(fromDate/toDate 必填且合法、toDate≥fromDate 否則 `invalid_range`、reason 必填、source 限 CUSTOMER/INTERNAL 空值→null)、`buildExclusionPatch`(部分更新沿用現值、跨欄位仍驗證 from<=to)、`normalizeSource`、`toIsoDate`。日期一律正規化為 UTC 午夜。
   - 純判斷：`isDateExcluded(date, ranges)`(含端點 UTC 日界，語意與 CalendarService.getProjectExclusionPredicate 一致)、`exclusionCalendarDays(range)`(含端點曆日計數，單日=1)。
   - 錯誤：`ExclusionEngineError`(from_required/to_required/invalid_date/invalid_range/reason_required/invalid_source)。
-- `apps/api/src/projects/exclusion-engine.spec.ts` + `exclusion.service.spec.ts`：**共 35 案，於 sandbox(tsc --strict module=node16 + 自製 jest-compat runner) 全綠（PASS:35 FAIL:0）**；引擎+服務 tsc --strict 編譯零錯誤。涵蓋正規化(UTC 午夜)、必填/範圍/source 驗證、單日排除、區間含端點判斷、部分更新跨欄位驗證、NotFound/BadRequest(保留 code)、時程避讓委派 CalendarService(預設 NEXT_WORKDAY、可切 PUSH_FORWARD)。
+- `apps/api/src/projects/exclusion-engine.spec.ts` + `exclusion.service.spec.ts`：**共 35 案，於 sandbox(tsc --strict node16 + 自製 jest-compat runner) 全綠（PASS:35 FAIL:0）**；引擎+服務 tsc --strict 編譯零錯誤。涵蓋正規化(UTC 午夜)、必填/範圍/source 驗證、單日排除、區間含端點判斷、部分更新跨欄位驗證、NotFound/BadRequest(保留 code)、時程避讓委派 CalendarService(預設 NEXT_WORKDAY、可切 PUSH_FORWARD)。
 - `apps/api/src/projects/exclusion.service.ts`：`ExclusionService`(Prisma + CalendarService)：addExclusion / listExclusions(依 fromDate 升冪) / updateExclusion / removeExclusion；deferDateAvoidingExclusions / rescheduleWithExclusions 委派 4.1 CalendarService(讀同一張 Exclusion 表，排除日與假日併行)。引擎錯誤經 guard() 轉 BadRequestException(保留 code)。沿用既有 Exclusion schema，不新增 migration。
 - 甘特圖即時呈現：沿用 5.2 gantt-engine 之 `exclusions[]` 網底 + GanttService 讀同一張 Exclusion 表，新增/移除後即時反映，無需於本模組重複。
 - **決策（5.4）**：排除日 CRUD/驗證抽為 `exclusion-engine.ts`(純邏輯) + `ExclusionService`(獨立服務，注入 Prisma + CalendarService)，**不改動 project.service.ts**。**理由**：SRP、與 module「引擎+Service」風格一致，降低改動既有大型服務的風險。
@@ -210,10 +230,10 @@
 - **決策（3.4）**：服務層操作既有 CUSTOMIZATION 案件（caseId 由呼叫端提供），不在此建立 Case/WorkflowDefinition。**理由**：與 3.3 一致；流程定義由 8.x/設計器產生。
 - **決策（4.1）**：曆法引擎日界一律以 UTC 判斷（toIsoDate/parseIsoDate 用 getUTC*）。**理由**：避免執行環境時區造成跨日誤差，測試亦可穩定重現。
 - **決策（4.1）**：§12-5 遞延規則（順延下一工作日 / 整體後推）已由主管定案為**順延下一工作日(NEXT_WORKDAY)**；兩種模式皆保留於引擎(DeferralMode)以備未來調整。
-- **決策（4.1）**：本輪**不新增 Holiday 資料表/migration**；假日來源以「範例固定日 + 呼叫端自訂(公司/政府行事曆)」組成，專案排除日讀既有 Exclusion 表。**更新(2026-06-07 review)**：主管決定**新增 Holiday 資料表由其維護**，排入下一輪(見 Handoff 12)。
+- **決策（4.1→7.1）**：假日來源原為「範例固定日 + 呼叫端自訂」；主管定案後 **7.1 已落地 `Holiday` 資料表（主管維護）**，CalendarService.loadCalendar 讀 DB 合併，專案排除日讀既有 Exclusion 表。
 - **決策（4.1）**：補班日(makeupWorkdays)與假日衝突時假日優先；補班日視為工作日以支援台灣『週六補班』情境。**理由**：符合『政府宣布放假』直覺，補班為例外的強制上班。
 - **決策（4.2）**：提醒時點不獨立儲存，而是由「已遞延的到期日(dueDate)」即時推導(computeReminderOccurrences)。**理由**：直接滿足驗收「遞延後提醒時間同步調整」——4.1 重算到期日後，提醒日自然跟著移動，無需另設同步邏輯或排程資料一致性處理。
-- **決策（4.2）**：通知管道(§12-7)以 `ReminderChannel` 列舉 + 可插拔 `ReminderDispatcher` 介面抽象，**本輪僅內建並落地系統內(IN_APP)** dispatcher(寫入 NOTIFICATION_INBOX)；Email/其他管道留 `registerDispatcher` 注入點。**更新(2026-06-07 review)**：主管決定**先以每日定時寄送 Email(SMTP)**，排入下一輪(見 Handoff 12)。
+- **決策（4.2）**：通知管道(§12-7)以 `ReminderChannel` 列舉 + 可插拔 `ReminderDispatcher` 介面抽象，**本輪僅內建並落地系統內(IN_APP)** dispatcher(寫入 NOTIFICATION_INBOX)；Email/其他管道留 `registerDispatcher` 注入點。**更新(2026-06-07 review)**：主管決定**先以每日定時寄送 Email(SMTP)**，排入 7.2（#32）。
 - **決策（4.2）**：提醒規則以「到期前 3/1 工作日 + 到期當日 + 逾期 1 工作日」為**預設**，可由 ReminderPolicy 覆寫；offset 可選工作日或曆日。**理由**：§8.3 未明定提醒時點密度，先給合理可用預設並保留部門自訂。
 - **決策（4.2）**：派送去重以 append-only `NOTIFICATION_DISPATCH_LOG`(FormSubmission) 記 dedupKey，跨輪以 getSentDedupKeys 過濾；系統內通知落 `NOTIFICATION_INBOX`。**理由**：沿用既有「不新增 migration、FormSubmission 落地」風格(如 3.4 狀態事件)。
 - **決策（4.2）**：reminder-engine 與 onboarding/StepInstance 解耦(以結構型別 `ScheduledLike` / `ReminderTarget` 接收)，由服務層才接 Prisma StepInstance 與 CalendarService。**理由**：與 3.2/3.3 跨模組解耦一致，引擎可純函式測試。
@@ -231,28 +251,31 @@
 - **決策（5.5）**：前端以 `types.ts` 鏡像後端 `GanttView` 結構(解耦)，比例化資料直接繪製、不重算業務邏輯。**理由**：與既有跨模組解耦風格一致；REST 就緒後把 seed 換 fetch 即可，元件與純邏輯不動。
 - **決策（6.1，依 review）**：「即將到期」欄同時收納逾期任務(集中需立即處理者於一欄)，逾期仍以 `overdue` marker 標示；KPI 的「即將到期」「逾期」各自獨立計數。視窗以**工作日**衡量(注入 CalendarService.businessDaysBetween，預設 3 工作日)。**理由**：符合主管對「需立即處理集中呈現」與「工作日視窗較貼近實務」的決策；`columnOf`/`upcomingWithinDays`/`workdayCounter` 皆可調。
 - **決策（6.1）**：kanban 引擎與行事曆解耦(注入 deferralResolver / workdayCounter，同 delay-engine)；可見範圍重用 1.4 AccessScopeService.caseWhere。前端 task-kanban 以前端鏡像型別 + seed 驅動(同 project-gantt)，待 /kanban REST 改 fetch。
+- **決策（7.1）**：Holiday 表由主管維護（GOVERNMENT/COMPANY 來源、HOLIDAY/MAKEUP_WORKDAY 類型，date @unique）；loadCalendar 讀 DB 合併內建範例與呼叫端自訂，補班與假日衝突沿用引擎「假日優先」。
+- **決策（7.1）**：onboarding 排程引擎泛型化 `<S = OnboardingStep>`（buildSchedule/dueReminders/checkpoint 型別），環境建置帶 `EnvironmentStep` 重用；環境 checkpoints 不內建預設位移（§6 未定義、不臆測）。
 
 ## 未完成 / Handoff（下一輪或人類接手）
 1. ✅（3.1）拜訪/會議紀錄 + 成案移交藍圖持久化落地（getHandoff 可取回）。
 2. ✅（3.2）系統導入流程引擎 + 服務落地：接收銷售移交、預定義時間點/提醒、委任權限表簽核把關、**移交工程建立 ENVIRONMENT 案件**。
 3. ✅（3.3）環境建置流程引擎 + 服務落地：依銷售模式分支、接收導入移交、主機採購等待狀態、環境驗收把關→COMPLETED。
-4. **CI 全流程驗證**：3.3~6.1 各純引擎 + spec 已於 sandbox 驗證(tsc --strict + node 測試全綠)；各 `*.service.ts`（含 projects/gantt/delay/exclusion/kanban）+ kanban.controller 以 stub(PrismaService/@nestjs/common/@prisma/client/auth/rbac/calendar) 通過 strict typecheck，惟未在真實 monorepo 跑 `pnpm -r build`(需 generated Prisma client)。**前端 project-gantt(5.5)/task-kanban(6.1) 已於 sandbox 過 tsc --strict + noUnused；vitest 在 sandbox 觸發 worker bus error 改以等價 harness 全綠，請 review 時在真實環境跑 `pnpm --filter @wfms/web test` 確認 vitest 綠**。下輪/人類 review 時請確認 CI build 綠。
+4. **CI 全流程驗證**：3.3~7.1 各純引擎 + spec 已於 sandbox 驗證(tsc --strict + node 測試全綠)；各 `*.service.ts` + controller 以 stub 通過 strict typecheck，惟未在真實 monorepo 跑 `pnpm -r build`(需 generated Prisma client)。**前端 vitest 在 sandbox 觸發 worker bus error 改以等價 harness 全綠，請 review 時在真實環境跑 `pnpm --filter @wfms/web test` 確認**。屬 9.2（#37）範圍。
 5. ✅（3.4）客製化（需求變更）流程引擎 + 服務落地。
-6. ✅（4.1）曆法遞延引擎 + CalendarService 已落地。**仍待整合**：將 onboarding/environment service 實際呼叫 `CalendarService.buildIsExcluded()` 注入 buildSchedule(目前仍為預設 identity)；**持久化假日來源(Holiday 表，主管已同意建立，見 12)**；遞延模式已定案 NEXT_WORKDAY。
-7. ✅（4.2）提醒與通知引擎 + ReminderService 已落地。**仍待**：(a) **Email(SMTP) dispatcher + 每日定時(cron)派送**(主管已定案，見 12)；(b) 提醒規則是否需可由設計器設定；(c) StepInstance.dueDate 來源——需與流程推進/專案管理實際寫入後，提醒才有資料。
+6. ✅（4.1→7.1）曆法遞延引擎 + CalendarService 已落地；**7.1 已完成**：假日來源持久化（Holiday 表，主管維護）＋ onboarding/environment service 實際呼叫 `CalendarService.buildIsExcluded()` 注入 buildSchedule（identity 已取代）；遞延模式定案 NEXT_WORKDAY。
+7. ✅（4.2）提醒與通知引擎 + ReminderService 已落地。**仍待**：(a) **Email(SMTP) dispatcher + 每日定時(cron)派送**（7.2 #32，下一個可動工）；(b) 提醒規則是否需可由設計器設定；(c) StepInstance.dueDate 來源——需與流程推進/專案管理實際寫入後，提醒才有資料。
 8. ✅（5.1~5.6）專案管理引擎 + 服務 + 前端甘特/簡報/雙向導覽皆落地。**仍待**：§9-6 排除日落入流程區間自動順延 planEnd、§9-5 全專案 vs 特定流程、§9-1 進度認定方式定案。
-9. **REST controller / 前端 UI**：sales/onboarding/environment/customization/calendar/reminders/projects 後端 REST controller 仍未提供（屬後續 API 任務）。**已提供**：auth(既有)、**kanban(6.1 GET /kanban)**。**前端**：workflow-designer(2.2)、project-gantt(5.5/5.6)、**task-kanban(6.1)** 皆已就緒(seed 驅動，待 REST 改 fetch)；其餘專案 CRUD/排除日管理/延遲清單 UI 待補。
-10. **服務層整合測試**：各 service 目前僅引擎層純函式測試覆蓋；DB 行為待後續以整合測試補強。
-11. ✅（6.1）任務看板：引擎(分欄/到期·逾期·遞延標示/KPI/角色過濾、即將到期含逾期、工作日視窗) + KanbanService + **KanbanController(GET /kanban)** + **apps/web task-kanban 前端看板頁**皆落地並驗證(引擎 47 案 + 前端 10 案)。**仍待**：(a) 待填表單數 `pendingRequiredForms` 接 FormsModule 統計(目前 0)；(b) 前端改接 /kanban REST 並把 `onOpenCase` 串到實際案件詳情頁(目前 seed + 側欄詳情)；(c) §12-5 假日來源(Holiday 表)定案後 getBoard 帶 holiday 參數。下一個可動工：6.2 ISO 27001 文件化軌跡（#30）。
-12. **（2026-06-07 review 新增，排下一輪）**：(a) **新增 Prisma `Holiday` 資料表由主管維護**(國定假日/連假/補班)，CalendarService.buildCalendar 改讀 DB 合併——此為首次正式 migration，需確認 CI/seed；(b) **提醒每日定時寄送 Email(SMTP)**：實作 SMTP `ReminderDispatcher`(host/port/帳密由 env)、以排程器(如 @nestjs/schedule cron)每日掃描各案件 `dispatchDueReminders`。
+9. **REST controller / 前端 UI**：sales/onboarding/environment/customization/calendar/reminders/projects 後端 REST controller 仍未提供（8.1 #33）。**已提供**：auth(既有)、kanban(6.1 GET /kanban)、iso-trail(6.2)。**前端**：workflow-designer(2.2)、project-gantt(5.5/5.6)、task-kanban(6.1) 皆已就緒(seed 驅動，待 REST 改 fetch，8.2 #34)；ISO 稽核查閱頁屬 8.3 #35。
+10. **服務層整合測試**：各 service 目前僅引擎層純函式測試＋stub 接線測試覆蓋；真實 DB 行為屬 9.1（#36）。
+11. ✅（6.1）任務看板已落地。**仍待**：(a) 待填表單數 `pendingRequiredForms` 接 FormsModule 統計(目前 0)；(b) 前端改接 /kanban REST 並把 `onOpenCase` 串到實際案件詳情頁（8.2 #34）；(c) ✅ 假日來源——7.1 已改 `loadCalendar` 由 DB Holiday 表驅動。
+12. **（2026-06-07 review 新增）**：(a) ✅ **7.1 完成**——Holiday 資料表＋CalendarService DB 化＋buildSchedule 注入；(b) **7.2（#32）提醒每日定時寄送 Email(SMTP)**：實作 SMTP `ReminderDispatcher`(host/port/帳密由 env)、以排程器(建議 @nestjs/schedule cron)每日掃描各案件 `dispatchDueReminders`——**下一個可動工**。
+13. **（7.1 註記）**：Holiday CRUD 目前僅 Service 層；REST 端點（主管維護 UI 用）併入 8.1 calendar controller 補齊。環境建置排程 checkpoints 位移值待部門預定義（§12-3/§12-4 相關）。
 
 ## 待釐清（沿用，需求 §12 / 專案管理模組規格 §9）
 - §12-1 跨角色移交是否需主管核可、流程一律由特定角色發起 → 設計器已留「觸發角色＋條件」欄位，實際核可關卡待釐清（3.4 指派鏈已留 roleMatches 回報、未強制）。
 - §12-2 失敗原因分類項目（供改善分析報表）→ 影響 3.1 失敗分類 Enum 收斂，目前以可擴充字串承載。
 - §12-3 各表單實際欄位（報價單/客製需求/委任權限表/人員資料表/環境建置檢核表等）→ 目前僅以 code 標識容器、data 承載 JSON。
 - §12-4 各表單簽核關卡與層級 → 影響環境驗收/客製化複測是否需簽核（3.3/3.4 目前未強制，保留簽核集合介面）。
-- §12-5 行事曆遞延規則 → **已定案：順延下一工作日(NEXT_WORKDAY)**；**假日來源：主管決定新增 Holiday 資料表自行維護(排下一輪)**，定案前以 calendar-engine 內建西曆固定日 + 週末兜底(6.1 看板遞延標示亦沿用)。
-- §12-7 提醒管道 → **已定案：先以每日定時寄送 Email(SMTP)**(排下一輪)；系統內 IN_APP 已落地。
+- §12-5 行事曆遞延規則 → **已定案：順延下一工作日(NEXT_WORKDAY)**；**假日來源：✅ 7.1 已落地 Holiday 資料表（主管維護），loadCalendar 讀 DB 合併，onboarding/environment/kanban 皆已串接**。
+- §12-7 提醒管道 → **已定案：先以每日定時寄送 Email(SMTP)**（7.2 #32 排程中）；系統內 IN_APP 已落地。
 - §12-10 附件/範本實體儲存於系統或改以 SharePoint/OneDrive 連結為主、允許檔案類型與大小上限 → 影響 2.4/2.5 上傳實作，待主管確認。
 - 專案管理模組規格 §9-1 進度認定方式（步驟比例/加權工時/人工填報）→ **5.1 先以步驟完成比例為預設並保留 progress 可人工覆寫，待主管定案**。
 - 專案管理模組規格 §9-2/§9-3/§9-6 容許門檻 T、預期進度日曆日或工作日基準、排除日順延規則 → 5.2/5.3/5.4 已實作可設定介面，預設值/planEnd 自動順延待主管定案。
