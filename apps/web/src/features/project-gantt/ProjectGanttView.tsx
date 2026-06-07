@@ -1,3 +1,12 @@
+/**
+ * 專案進度甘特圖 + 簡報模式（issue #27，5.5）+ 案件雙向導覽（issue #28，5.6）。
+ * 視覺對齊 prototype/index.html（view-project）：
+ *  - 上：專案表頭卡（名稱/代碼/客戶 + 簡報模式按鈕）+ KPI（grid-kpi）。
+ *  - 中：流程時間軸甘特圖（g-months / g-row / g-bar+fill+pct / 今日線 / 排除日網底）+ legend。
+ *  - 下：各流程進度狀態、專案行事曆排除日（detail-grid）。
+ * 簡報模式：一鍵切換沉浸覆蓋層，隱藏次要 chrome、放大時間軸與 KPI；F/P 切換、Esc 退出。
+ * 所有切換僅影響呈現版面，不變動任何資料。
+ */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import {
@@ -16,10 +25,10 @@ import { ui } from './styles';
 import type { GanttRow, ProjectGanttData } from './types';
 
 const TONE_COLOR: Record<string, string> = {
-  primary: '#2563eb',
-  good: '#16a34a',
-  warn: '#dc2626',
-  muted: '#475569',
+  primary: 'var(--brand)',
+  good: 'var(--green)',
+  warn: 'var(--red)',
+  muted: 'var(--muted)',
 };
 
 /** 嘗試進入 / 離開瀏覽器全螢幕（best-effort，環境不支援時靜默略過，不影響資料）。 */
@@ -45,20 +54,10 @@ function rowJumpable(row: GanttRow, onSelectCase?: (caseId: string) => void): bo
 export interface ProjectGanttViewProps {
   /** 專案甘特資料；未提供時使用 seed 範例（REST 層就緒前）。 */
   data?: ProjectGanttData;
-  /**
-   * 點擊有對應案件之流程列時的回呼（issue #28，5.6）。
-   * 未提供時流程列不提供跳轉（§5.3「無對應案件之流程不提供跳轉」亦含此情況）。
-   */
+  /** 點擊有對應案件之流程列時的回呼（issue #28，5.6）。未提供時不提供跳轉。 */
   onSelectCase?: (caseId: string) => void;
 }
 
-/**
- * 專案進度甘特圖 + 簡報模式（issue #27，5.5）+ 案件雙向導覽（issue #28，5.6）。
- *
- * 簡報模式：一鍵切換，隱藏側欄與次要工具列、放大時間軸與重點 KPI、進入沉浸版面，
- * 並支援鍵盤（F/P 切換、Esc 退出）。所有切換僅影響呈現版面，不變動任何資料。
- * 雙向導覽：有對應案件（caseId）之流程列可點擊跳轉案件詳情。
- */
 export function ProjectGanttView({ data = sampleProjectGantt, onSelectCase }: ProjectGanttViewProps): JSX.Element {
   const [mode, setMode] = useState<ViewMode>('NORMAL');
   const layout = useMemo(() => derivePresentationLayout(mode), [mode]);
@@ -87,169 +86,205 @@ export function ProjectGanttView({ data = sampleProjectGantt, onSelectCase }: Pr
   const presenting = isPresentation(mode);
   const kpiCards = selectKpiCards(view.kpis, mode);
 
-  const containerStyle: CSSProperties = presenting
-    ? { ...ui.presentationOverlay, fontSize: `${layout.fontScale}rem` }
-    : {};
-
   // 簡報模式下不啟用列跳轉（沉浸呈現，避免誤觸切換畫面）。
   const rowSelect = presenting ? undefined : onSelectCase;
-  const chart = (
-    <Chart
-      data={data}
-      rowHeightPx={layout.rowHeightPx}
-      minHeightPx={layout.timelineMinHeightPx}
-      onSelectCase={rowSelect}
-    />
-  );
 
   const kpiPanel = (
-    <div style={ui.kpiRow}>
+    <div className="grid-kpi" style={{ margin: '18px 0 4px' }}>
       {kpiCards.map((c) => (
-        <div key={c.key} style={ui.kpiCard}>
-          <div style={ui.kpiLabel}>{c.label}</div>
-          <div style={{ ...ui.kpiValue, color: TONE_COLOR[c.tone] }}>{c.value}</div>
+        <div key={c.key} className="card kpi">
+          <div className="n" style={{ color: TONE_COLOR[c.tone] }}>
+            {c.value}
+          </div>
+          <div className="l">{c.label}</div>
         </div>
       ))}
     </div>
   );
 
-  const toolbar = (
-    <div style={ui.toolbar}>
-      <strong style={{ fontSize: '1.05rem' }}>{project.name}</strong>
-      <span style={ui.muted}>
-        {project.code}．{project.client}
-      </span>
-      <span style={ui.spacer} />
-      <button
-        type="button"
-        style={{ ...ui.btn, ...ui.btnPrimary }}
-        onClick={onToggle}
-        aria-pressed={presenting}
-      >
-        {presenting ? '退出簡報（Esc）' : '進入簡報模式'}
-      </button>
+  const headerCard = (
+    <div className="card pad">
+      <div className="case-head">
+        <div>
+          <h2>{project.name}</h2>
+          <div className="muted">
+            {project.code}　·　{project.client}　·　{project.planStart} ~ {project.planEnd}
+          </div>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <button className="btn sm" onClick={onToggle} aria-pressed={presenting}>
+            {presenting ? '⏏ 退出簡報（Esc）' : '🖥️ 簡報模式'}
+          </button>
+        </div>
+      </div>
+      {kpiPanel}
+    </div>
+  );
+
+  const chartCard = (
+    <div className="card pad" style={{ marginTop: 16, overflow: 'auto' }}>
+      <div className="sec-title">流程時間軸（甘特圖）</div>
+      <Chart data={data} rowHeightPx={layout.rowHeightPx} onSelectCase={rowSelect} />
+      <div className="legend">
+        <span>🟦 計畫區間　▰ 已完成比例　🔴 今日基準線　▨ 排除日</span>
+        <span>↗ 點流程名稱可跳至該案件詳情</span>
+      </div>
     </div>
   );
 
   if (presenting) {
+    const overlay: CSSProperties = { ...ui.presentationOverlay, fontSize: `${layout.fontScale}rem`, background: 'var(--bg)' };
     return (
-      <div style={containerStyle} role="region" aria-label="簡報模式">
-        {toolbar}
-        <div style={{ ...ui.headline, fontSize: '1.1rem', fontWeight: 600 }}>
-          {presentationHeadline(view)}
+      <div style={overlay} role="region" aria-label="簡報模式">
+        <div className="sec-title" style={{ fontSize: 18 }}>
+          {project.name}
+          <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>
+            {presentationHeadline(view)}
+          </span>
+          <span style={{ flex: 1 }} />
+          <button className="btn sm" onClick={onToggle}>
+            ⏏ 退出簡報（Esc）
+          </button>
         </div>
         {kpiPanel}
-        {chart}
+        {chartCard}
       </div>
     );
   }
 
   return (
-    <div>
-      {toolbar}
-      <div style={ui.layout}>
-        {layout.showSidebar && (
-          <aside style={ui.sidebar}>
-            <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 6 }}>掛載流程</div>
+    <section className={presenting ? 'present' : undefined}>
+      {layout.showSecondaryChrome && (
+        <div className="banner">
+          📊 專案可串接多個流程，於甘特圖時間軸掌握各流程進度與延遲/超前；可定義專案行事曆排除日，並切換簡報模式於會議呈現。
+        </div>
+      )}
+      {headerCard}
+      {chartCard}
+
+      <div className="detail-grid" style={{ marginTop: 16 }}>
+        <div className="card pad">
+          <div className="sec-title" style={{ fontSize: 14 }}>
+            各流程進度狀態
+          </div>
+          <ul className="meta-list">
             {view.rows.map((r) => {
               const meta = statusMeta(r.status);
               const jumpable = rowJumpable(r, rowSelect);
-              const jump = jumpable ? () => rowSelect!(r.caseId as string) : undefined;
               return (
-                <div
-                  key={r.id}
-                  style={{ ...ui.listItem, ...(jumpable ? { cursor: 'pointer' } : null) }}
-                  role={jumpable ? 'button' : undefined}
-                  tabIndex={jumpable ? 0 : undefined}
-                  onClick={jump}
-                  onKeyDown={
-                    jumpable
-                      ? (e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault();
-                            jump!();
+                <li key={r.id}>
+                  <span
+                    style={jumpable ? { color: 'var(--brand)', fontWeight: 600, cursor: 'pointer' } : undefined}
+                    onClick={jumpable ? () => rowSelect!(r.caseId as string) : undefined}
+                    role={jumpable ? 'button' : undefined}
+                    tabIndex={jumpable ? 0 : undefined}
+                    onKeyDown={
+                      jumpable
+                        ? (e) => {
+                            if (e.key === 'Enter' || e.key === ' ') rowSelect!(r.caseId as string);
                           }
-                        }
-                      : undefined
-                  }
-                  title={jumpable ? '點擊查看案件詳情' : undefined}
-                >
-                  <div style={{ fontWeight: 500, color: jumpable ? '#2563eb' : undefined }}>
+                        : undefined
+                    }
+                  >
                     {r.name}
                     {jumpable ? ' ↗' : ''}
-                  </div>
-                  <div style={ui.muted}>
-                    {r.planStart} ~ {r.planEnd}
-                    <span style={{ ...ui.pill, background: meta.bg, color: meta.color }}>
+                  </span>
+                  <span>
+                    <span className="pill" style={{ background: meta.bg, color: meta.color }}>
                       {meta.label}
                     </span>
-                  </div>
-                </div>
+                    　{r.progress}%（預期 {r.expected}%，{formatDelta(r.delta)}）
+                  </span>
+                </li>
               );
             })}
-          </aside>
-        )}
-        <div style={ui.main}>
-          {kpiPanel}
-          {chart}
-          {layout.showSecondaryChrome && (
-            <p style={{ ...ui.muted, marginTop: '0.75rem' }}>
-              提示：點「進入簡報模式」或按 F／P 鍵可放大畫面供會議簡報，按 Esc 退出。簡報模式僅切換版面，不影響資料。
-              有「↗」標記的流程列可點擊查看對應案件詳情。
-            </p>
-          )}
+          </ul>
+        </div>
+        <div className="card pad">
+          <div className="sec-title" style={{ fontSize: 14 }}>
+            專案行事曆 — 排除日
+          </div>
+          <ul className="meta-list">
+            {view.exclusions.length === 0 && (
+              <li>
+                <span className="muted">尚無排除日</span>
+              </li>
+            )}
+            {view.exclusions.map((x, i) => (
+              <li key={`${x.fromDate}-${i}`}>
+                <span className="k">
+                  {x.fromDate} ~ {x.toDate}
+                </span>
+                <span>{x.reason ?? '排除日'}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="muted" style={{ fontSize: 11, marginTop: 8 }}>
+            客戶反應需排除的作業 / 會議日期，排程將避開並於甘特圖標示。
+          </div>
         </div>
       </div>
-    </div>
+
+      {layout.showSecondaryChrome && (
+        <p className="muted" style={{ marginTop: 12, fontSize: '12.5px' }}>
+          提示：點「簡報模式」或按 F／P 鍵可放大畫面供會議簡報，按 Esc 退出。簡報模式僅切換版面，不影響資料。
+        </p>
+      )}
+    </section>
   );
 }
 
-/** 甘特圖本體（月份刻度 + 流程長條 + 完成填色 + 今日線 + 排除日網底）。 */
+/** 甘特圖本體（月份刻度 + 流程長條 + 完成填色 + 今日線 + 排除日網底），對齊 prototype .gantt 標記。 */
 function Chart(props: {
   data: ProjectGanttData;
   rowHeightPx: number;
-  minHeightPx: number;
   onSelectCase?: (caseId: string) => void;
 }): JSX.Element {
-  const { data, rowHeightPx, minHeightPx, onSelectCase } = props;
+  const { data, rowHeightPx, onSelectCase } = props;
   const { view } = data;
   const pct = (n: number): string => `${(n * 100).toFixed(2)}%`;
 
-  return (
-    <div style={{ ...ui.chart, minHeight: minHeightPx }}>
-      <div style={ui.monthsBar}>
-        {view.axis.months.map((m) => (
-          <span key={m.key} style={{ ...ui.monthTick, left: pct(m.startRatio) }}>
-            {m.label}
-          </span>
-        ))}
-      </div>
+  const bands = (
+    <>
+      {view.exclusions.map((x, i) => (
+        <div
+          key={`${x.fromDate}-${i}`}
+          className="g-exclude"
+          style={{ left: pct(x.startRatio), width: pct(Math.max(x.endRatio - x.startRatio, 0.004)) }}
+          title={`${x.reason ?? '排除日'}（${x.fromDate} ~ ${x.toDate}）`}
+        />
+      ))}
+      {view.today.inRange && (
+        <div className="g-today" style={{ left: pct(view.today.ratio) }} title={`今日 ${view.today.date}`}>
+          <span className="dot" />
+        </div>
+      )}
+    </>
+  );
 
-      <div style={{ position: 'relative' }}>
-        {/* 排除日網底（橫跨所有列） */}
-        <div style={{ position: 'absolute', inset: 0, marginLeft: 168, pointerEvents: 'none' }}>
-          {view.exclusions.map((x, i) => (
-            <div
-              key={`${x.fromDate}-${i}`}
-              style={{
-                ...ui.exclusionBand,
-                left: pct(x.startRatio),
-                width: pct(Math.max(x.endRatio - x.startRatio, 0.004)),
-              }}
-              title={`${x.reason ?? '排除日'}（${x.fromDate} ~ ${x.toDate}）`}
-            />
+  return (
+    <div>
+      <div className="g-head">
+        <div />
+        <div className="g-months">
+          {view.axis.months.map((m) => (
+            <span key={m.key} className="g-month" style={{ left: pct(m.startRatio) }}>
+              {m.label}
+            </span>
           ))}
         </div>
-
+      </div>
+      <div className="gantt">
         {view.rows.map((r) => {
           const meta = statusMeta(r.status);
           const widthRatio = Math.max(r.endRatio - r.startRatio, 0.006);
           const jumpable = rowJumpable(r, onSelectCase);
           const jump = jumpable ? () => onSelectCase!(r.caseId as string) : undefined;
           return (
-            <div key={r.id} style={{ ...ui.rowLine, height: rowHeightPx }}>
+            <div key={r.id} className="g-row">
               <div
-                style={{ ...ui.rowLabel, ...(jumpable ? { cursor: 'pointer', color: '#2563eb' } : null) }}
+                className="g-label"
+                style={jumpable ? { cursor: 'pointer' } : undefined}
                 title={jumpable ? `${r.name}（點擊查看案件詳情）` : r.name}
                 role={jumpable ? 'button' : undefined}
                 tabIndex={jumpable ? 0 : undefined}
@@ -265,36 +300,28 @@ function Chart(props: {
                     : undefined
                 }
               >
-                {r.name}
-                {jumpable ? ' ↗' : ''}
+                <span style={jumpable ? { color: 'var(--brand)', fontWeight: 600 } : undefined}>
+                  {r.name}
+                  {jumpable ? ' ↗' : ''}
+                </span>
+                <span className="muted" style={{ fontSize: 11 }}>
+                  {r.planStart} ~ {r.planEnd}
+                </span>
               </div>
-              <div style={ui.rowTrack}>
+              <div className="g-track" style={{ height: rowHeightPx }}>
+                {bands}
                 <div
-                  style={{
-                    ...ui.bar,
-                    left: pct(r.startRatio),
-                    width: pct(widthRatio),
-                    height: Math.round(rowHeightPx * 0.5),
-                    background: meta.bg,
-                    border: `1px solid ${meta.color}`,
-                  }}
-                  title={`${r.name}：進度 ${r.progress}%（預期 ${r.expected}%，差異 ${formatDelta(
-                    r.delta,
-                  )}）`}
+                  className="g-bar"
+                  style={{ left: pct(r.startRatio), width: pct(widthRatio), borderColor: meta.color }}
+                  title={`${r.name}：進度 ${r.progress}%（預期 ${r.expected}%，差異 ${formatDelta(r.delta)}）`}
                 >
-                  <div style={{ ...ui.barFill, width: pct(r.fillRatio), background: meta.color }} />
+                  <div className="fill" style={{ width: pct(r.fillRatio) }} />
+                  <span className="pct">{r.progress}%</span>
                 </div>
               </div>
             </div>
           );
         })}
-
-        {/* 今日線 */}
-        <div style={{ position: 'absolute', inset: 0, marginLeft: 168, pointerEvents: 'none' }}>
-          {view.today.inRange && (
-            <div style={{ ...ui.todayLine, left: pct(view.today.ratio) }} title={`今日 ${view.today.date}`} />
-          )}
-        </div>
       </div>
     </div>
   );
