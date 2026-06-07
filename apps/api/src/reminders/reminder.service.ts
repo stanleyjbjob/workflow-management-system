@@ -302,13 +302,20 @@ export class ReminderService {
     return out;
   }
 
-  /** 將一筆系統內通知標記為已讀。 */
-  async markNotificationRead(notificationId: string): Promise<void> {
+  /**
+   * 將一筆系統內通知標記為已讀。
+   * opts.recipientId（8.1 REST 起）：限定僅收件人本人可標已讀；非本人視同查無（404，不洩漏存在性）。
+   */
+  async markNotificationRead(notificationId: string, opts: { recipientId?: string } = {}): Promise<void> {
     const sub = await this.prisma.formSubmission.findUnique({
       where: { id: notificationId },
       select: { id: true, data: true },
     });
     if (!sub) throw new NotFoundException(`Notification ${notificationId} not found`);
+    if (opts.recipientId != null) {
+      const rid = ((sub.data ?? {}) as { recipientId?: unknown }).recipientId;
+      if (rid !== opts.recipientId) throw new NotFoundException(`Notification ${notificationId} not found`);
+    }
     const data = { ...((sub.data ?? {}) as Record<string, unknown>), read: true };
     await this.prisma.formSubmission.update({
       where: { id: notificationId },
