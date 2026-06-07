@@ -257,4 +257,18 @@
 8. ✅（5.1~5.6）專案管理引擎 + 服務 + 前端甘特/簡報/雙向導覽皆落地。**仍待**：§9-6 排除日落入流程區間自動順延 planEnd、§9-5 全專案 vs 特定流程、§9-1 進度認定方式定案。
 9. **REST controller / 前端 UI**：sales/onboarding/environment/customization/calendar/reminders/projects 後端 REST controller 仍未提供（屬後續 API 任務）。**已提供**：auth(既有)、**kanban(6.1 GET /kanban)**。**前端**：workflow-designer(2.2)、project-gantt(5.5/5.6)、**task-kanban(6.1)** 皆已就緒(seed 驅動，待 REST 改 fetch)；其餘專案 CRUD/排除日管理/延遲清單 UI 待補。
 10. **服務層整合測試**：各 service 目前僅引擎層純函式測試覆蓋；DB 行為待後續以整合測試補強。
-11. ✅（6.1）任務看板：引擎(分欄/到期·逾期·遞延標示/KPI/角色過濾、即將到期含逾期、工作日視窗) + KanbanService + **KanbanController(GET /kanban)** + **apps/web task-kanban 前端看板頁**皆落地並驗證(引擎 47 案 + 前端 10 案)。**仍待**：(a) 待填表單數 `pendingRequiredForms` 接 FormsModule 統計(目前 0)；(b) 前端改接 /kanban REST 並把 `onOpenCase` 串到實際案件詳情頁(目前 seed + 側欄詳情)；(c) §12-5 假日來源(Ho
+11. ✅（6.1）任務看板：引擎(分欄/到期·逾期·遞延標示/KPI/角色過濾、即將到期含逾期、工作日視窗) + KanbanService + **KanbanController(GET /kanban)** + **apps/web task-kanban 前端看板頁**皆落地並驗證(引擎 47 案 + 前端 10 案)。**仍待**：(a) 待填表單數 `pendingRequiredForms` 接 FormsModule 統計(目前 0)；(b) 前端改接 /kanban REST 並把 `onOpenCase` 串到實際案件詳情頁(目前 seed + 側欄詳情)；(c) §12-5 假日來源(Holiday 表)定案後 getBoard 帶 holiday 參數。下一個可動工：6.2 ISO 27001 文件化軌跡（#30）。
+12. **（2026-06-07 review 新增，排下一輪）**：(a) **新增 Prisma `Holiday` 資料表由主管維護**(國定假日/連假/補班)，CalendarService.buildCalendar 改讀 DB 合併——此為首次正式 migration，需確認 CI/seed；(b) **提醒每日定時寄送 Email(SMTP)**：實作 SMTP `ReminderDispatcher`(host/port/帳密由 env)、以排程器(如 @nestjs/schedule cron)每日掃描各案件 `dispatchDueReminders`。
+
+## 待釐清（沿用，需求 §12 / 專案管理模組規格 §9）
+- §12-1 跨角色移交是否需主管核可、流程一律由特定角色發起 → 設計器已留「觸發角色＋條件」欄位，實際核可關卡待釐清（3.4 指派鏈已留 roleMatches 回報、未強制）。
+- §12-2 失敗原因分類項目（供改善分析報表）→ 影響 3.1 失敗分類 Enum 收斂，目前以可擴充字串承載。
+- §12-3 各表單實際欄位（報價單/客製需求/委任權限表/人員資料表/環境建置檢核表等）→ 目前僅以 code 標識容器、data 承載 JSON。
+- §12-4 各表單簽核關卡與層級 → 影響環境驗收/客製化複測是否需簽核（3.3/3.4 目前未強制，保留簽核集合介面）。
+- §12-5 行事曆遞延規則 → **已定案：順延下一工作日(NEXT_WORKDAY)**；**假日來源：主管決定新增 Holiday 資料表自行維護(排下一輪)**，定案前以 calendar-engine 內建西曆固定日 + 週末兜底(6.1 看板遞延標示亦沿用)。
+- §12-7 提醒管道 → **已定案：先以每日定時寄送 Email(SMTP)**(排下一輪)；系統內 IN_APP 已落地。
+- §12-10 附件/範本實體儲存於系統或改以 SharePoint/OneDrive 連結為主、允許檔案類型與大小上限 → 影響 2.4/2.5 上傳實作，待主管確認。
+- 專案管理模組規格 §9-1 進度認定方式（步驟比例/加權工時/人工填報）→ **5.1 先以步驟完成比例為預設並保留 progress 可人工覆寫，待主管定案**。
+- 專案管理模組規格 §9-2/§9-3/§9-6 容許門檻 T、預期進度日曆日或工作日基準、排除日順延規則 → 5.2/5.3/5.4 已實作可設定介面，預設值/planEnd 自動順延待主管定案。
+- 專案管理模組規格 §9-5 排除日是否區分「全專案」與「特定流程」→ 目前 Exclusion 僅 projectId(全專案)，待主管定案是否加 flowId 維度。
+- 專案管理模組規格 §10.6 簡報模式呈現範圍/版面細節 → 5.5 已落地一鍵簡報，細節待主管試用後回饋。
