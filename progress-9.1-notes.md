@@ -75,11 +75,31 @@ DATABASE_URL=postgresql://wfms:wfms@localhost:5432/wfms_test \
 - 對 kanban.int-spec + iso-trail.int-spec + setup.ts 及其完整相依樹（kanban/iso-trail/calendar/access-scope service+engine、prisma.service、auth.service 鏈）一起 typecheck → **exit 0 全綠**。
 - 注意：Delegate 回傳 Promise<any>，故 prisma `data:{}` 內欄位名 typo 不會被 tsc 抓到；本批已逐欄對照 `prisma/schema.prisma`（User.displayName、Case.code/flowType/assigneeId/createdById、FormSubmission.formDefinitionId/submittedById/approvedById、Attachment.type/uploadedById、LoginAudit.userId/eventType、Project/ProjectFlow/Exclusion 欄位）確認無誤。下一輪實跑 CI 仍為最終把關。
 
-## 下一輪 TODO（接力指示）
-1. **先確認 CI**：人工或以有權限的 API 查 main 最新 run 的 **integration-test job** 是否綠；若紅先修。整體 CI 另有 build-test（含 web）可能獨立紅，與 9.1 標的不同，勿混淆。
-2. 剩餘整測（最後一塊）：**projects 掛載/進度回寫**（ProjectFlow 掛 case、進度/延遲計算落地、AccessScope.projectWhere 收斂）。forms / workflow / kanban / iso-trail 已覆蓋。
-3. projects 補齊且全部綠燈後，評估是否再補 AccessScope 邊界案例；齊備才標 done。
+## 已落地（第 4 批，2026-06-08，commit `6b536b8`）
+- `apps/api/test/integration/projects.int-spec.ts`（5 案）：projects 服務層 DB 行為（整測最後一塊）。
+  - **mountFlow + getProjectDetail**：掛載既有案件，flowType／顯示名稱由 case 帶出並落 ProjectFlow（progress 預設 0、不自動回寫）；getProjectDetail 向下展開 case 4 步（order 遞增、stepDefinition.name、responsibleRole.code、assignee.displayName）。
+  - **refreshFlowProgress**：步驟 2/4 COMPLETED → progress 回寫 50 並落 DB；無 caseId 之手動流程 refresh 保留人工填報值（70 不變）。
+  - **mountFlow 把關**：flowType 與案件實際（SALES）不一致 → BadRequest；caseId 不存在 → NotFound；projectId 不存在 → NotFound。
+  - **DelayService.getProjectDelaysFresh**：1/4 完成→進度 25，計畫 06-01..06-11、基準 06-10→預期 90，status=DELAYED、delayDays>0、summary.delayedCount≥1；fresh 已把回寫後的 25 持久化進 ProjectFlow.progress。
+  - **AccessScope.projectWhere**（套真實 prisma.project.findMany）：主管空 where→全部 3 筆；非主管（PM）OR(owner/createdBy)→僅自己擁有/建立 2 筆，不含他人。
+- 基準時間固定 NOW=2026-06-10，避免 new Date() 非決定性。新檔由 jest.integration.config.js 的 testRegex 自動納入，CI integration-test job 無需改設定。
 
-## 驗收要點對應現況（issue #36）
-- 「整合測試可在 CI 啟動 DB 並通過」：CI job 已建（第 1 批），**job 級綠燈待人工確認**。
-- 「覆蓋主要 Service 路徑與權限收斂」：forms / workflow / kanban / iso-trail 已覆蓋（含 AccessScope 收斂）；**僅剩 projects 未覆蓋**。
+## 技術決策（第 4 批）
+- projects 整測直接 `new ProjectService(prisma)`、`new DelayService(prisma, projects, new CalendarService(prisma))`，與前批一致（標的是 Service 的 DB 行為而非 Nest DI 圖）。
+- projectWhere 收斂：ProjectService 本身不套可見範圍（依設計由 controller 套 AccessScope），故此測直接把 `accessScope.projectWhere(user)` 餵進真實 prisma.project.findMany，驗證 where 片段對真實 schema 有效並正確收斂——對齊 kanban 批以真服務注入驗證收斂的做法。
+- 延遲案例選 10 天工期 + 1/4 完成，使 expected(90) 與 actual(25) 差距遠大於預設門檻 ±8，狀態判定 DELAYED 穩定不受 rounding 邊界影響。
+
+## 本輪驗證方式（第 4 批；sandbox 限制不變）
+- `binaries.prisma.sh` 仍被 allowlist 擋 → 無法 `prisma generate`、本地無法實跑整測。
+- 以 stub-based tsc 5.5.4（strict + experimentalDecorators；手寫 `@prisma/client`/`@nestjs/common` stub，enum 成員逐一對齊 schema.prisma，@types/node+@types/jest 提供 globals）對 projects.int-spec + setup 及其完整相依樹（project/delay/calendar/access-scope service+engine、prisma.service）一起 typecheck → **exit 0 全綠**。harness 置於 `apps/api/_verify/`（未提交，跑完已刪）。
+- stub tsc 實際抓到 1 個真 bug：誤用 `summary.delayed`（實為 `delayedCount`），已修正後再驗證通過。
+- 注意：Delegate 回傳 Promise<any>，prisma `data:{}` 欄位 typo 不會被 tsc 抓到；已逐欄對照 schema.prisma（Project/ProjectFlow/Case/StepInstance/StepDefinition/Role/WorkflowDefinition/User 欄位）確認。
+
+## 整測覆蓋現況（issue #36 驗收要點）
+- 「覆蓋主要 Service 路徑與權限收斂」：**forms / workflow / kanban / iso-trail / projects 五塊皆已覆蓋**（含 AccessScope case/project 收斂）。整測撰寫面已齊備。
+- 「整合測試可在 CI 啟動 DB 並通過」：CI integration-test job 已建（第 1 批）；**job 級綠燈仍待人工確認**——sandbox 無法跑 prisma generate / 無 Postgres，連續多輪未能從 API 取得 job 級結果。
+
+## 下一輪 TODO（接力指示）
+1. **唯一未結項：確認 CI integration-test job 綠燈**（人工看 Actions 頁，或在有 token 環境查 actions/runs/<id>/jobs）。整體 CI 另有 build-test（含 web 套件 `pnpm -r test`）可能獨立紅，與 9.1 標的不同，勿混淆——只需確認 integration-test job 本身。
+2. 若 integration-test job 綠：本 issue 驗收要點全達成，可移 in-progress → done（留人類關閉）。
+3. 若紅：依失敗訊息修正對應 int-spec（多半是某欄位／關聯名稱或 enum 值與 schema 細節不符），修正後再確認。
