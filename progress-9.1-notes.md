@@ -51,11 +51,35 @@ DATABASE_URL=postgresql://wfms:wfms@localhost:5432/wfms_test \
 - 以 stub-based tsc 5.5.4（strict + noImplicitAny）驗證：手寫 `@prisma/client` / `@nestjs/common` stub（delegate 泛型對齊 schema 真實欄位），對 workflow.int-spec + setup + workflow.service + workflow-engine + prisma.service 一起 typecheck → **exit 0 全綠**。harness 置於 `apps/api/_verify/`（未提交）。
 - **CI 紅燈待查**：本輪嘗試讀 CI run #120（main, sha f751081）job 級結果，但可用的 GitHub API 在此環境對 actions/runs/<id>/jobs 與 commits/<sha>/check-runs 回空 body（小 JSON 取不到），無法判定 integration-test job 是否綠。觀察：CI 整體自 #116 起連續紅，含純前端 commit（#116/#117 8.3 web），研判紅燈來源較可能是 build-test job 的 `pnpm -r test`（含 web 套件），而非 integration-test。**下一輪務必確認 integration-test job 實際狀態**（人工看 Actions 頁或在有 token 的環境查 jobs API）。
 
+## 已落地（第 3 批，2026-06-08）
+- `apps/api/test/integration/kanban.int-spec.ts`（4 案）：KanbanService.getBoard DB 行為。
+  - 主管綜覽看到全部案件；COMPLETED 落 DONE 欄；responsibleRoleCode 由 stepDefinition.responsibleRole 落地；KPI（pending/upcoming/overdue/deferred）統計正確。
+  - 「即將到期」欄同時收納即將到期與逾期；週六到期之卡片由 CalendarService（DB Holiday 驅動）標示 deferred + deferredDays>0；無到期日落 TODO。
+  - 非主管（SALES）以 AccessScope.caseWhere 收斂：看得到 SALES 流程型別與自己經手案件，看不到他人 ONBOARDING 案件。
+  - filter：在可見範圍上再依 flowType 過濾。
+  - 基準時間固定 2026-06-10（週三，無內建假日），避免 new Date() 非決定性；到期日刻意選工作日/週末以對齊 upcoming/overdue/deferred 分類。
+- `apps/api/test/integration/iso-trail.int-spec.ts`（4 案）：IsoTrailService.getTrail / export DB 行為。
+  - 主管綜覽跨來源全彙整（表單×2 + 附件×1 + 登入×2 + 專案進度/排除×2 = 7）；簽核缺口統計（signableCount/signedCount/pendingSignatureCount）。
+  - 非主管（SALES）：案件相關（表單/附件）以 caseWhere 收斂、登入僅本人、不含專案層紀錄（共 3 筆）。
+  - exportAudit/exportCsv：summary.total、pendingSignatureIds、扁平 CSV 列數（表頭 + 7 列）與內容。
+  - retentionPolicy 注入：retentionUntil 落地；以遠未來基準計入 expiredRetentionCount。
+
+## 技術決策（第 3 批）
+- kanban 整測同時實例化 `AccessScopeService` 與 `CalendarService(prisma)`，直接 `new KanbanService(prisma, accessScope, calendar)`：標的是「AccessScope 可見範圍收斂 + Calendar 假日遞延」兩條 DB 相依路徑的真實組合，故注入真服務而非 mock。
+- iso-trail 非主管可見範圍：依 service 既有設計，登入紀錄僅本人、專案層紀錄（ProjectFlow/Exclusion）僅主管可見 → 整測據此斷言（非主管 0 筆專案紀錄），固化現行收斂行為。
+- 簽核 gate 以 SubmissionStatus 驅動：APPROVED→signedOff、SUBMITTED 之 signable 表單入 pendingSignature；以「委任授權書（DELEGATION_AUTH，requiresSignature）」作為 signable 樣本。
+
+## 本輪驗證方式（第 3 批；sandbox 限制不變）
+- 仍無法 `prisma generate`、本地無法實跑整測。
+- stub-based tsc 5.5.4（strict + noImplicitAny + experimentalDecorators）：harness `apps/api/_verify/`（未提交），paths 將 `@prisma/client`（enum 對齊 schema：RoleCode/FlowType/StepInstanceStatus/SubmissionStatus/AttachmentType/HolidaySource/HolidayType/AuthEventType + 泛型 Delegate + Prisma 命名空間）與 `@nestjs/common`（Injectable/exceptions/Logger 等）指到手寫 stub；jest globals 與 node 環境（crypto/Buffer/URLSearchParams/fetch）以 ambient d.ts 宣告。
+- 對 kanban.int-spec + iso-trail.int-spec + setup.ts 及其完整相依樹（kanban/iso-trail/calendar/access-scope service+engine、prisma.service、auth.service 鏈）一起 typecheck → **exit 0 全綠**。
+- 注意：Delegate 回傳 Promise<any>，故 prisma `data:{}` 內欄位名 typo 不會被 tsc 抓到；本批已逐欄對照 `prisma/schema.prisma`（User.displayName、Case.code/flowType/assigneeId/createdById、FormSubmission.formDefinitionId/submittedById/approvedById、Attachment.type/uploadedById、LoginAudit.userId/eventType、Project/ProjectFlow/Exclusion 欄位）確認無誤。下一輪實跑 CI 仍為最終把關。
 
 ## 下一輪 TODO（接力指示）
 1. **先確認 CI**：人工或以有權限的 API 查 main 最新 run 的 **integration-test job** 是否綠；若紅先修。整體 CI 另有 build-test（含 web）可能獨立紅，與 9.1 標的不同，勿混淆。
-2. 續補整測（剩餘）：
-   - projects 掛載/進度回寫（ProjectFlow 掛 case、進度/延遲計算落地）。
-   - kanban getBoard（AccessScope 可見範圍收斂）。
-   - iso-trail getTrail/export（append-only 落地、匯出內容）。
-3. 全部綠燈後再評估補 AccessScope 邊界案例，齊備才標 done。
+2. 剩餘整測（最後一塊）：**projects 掛載/進度回寫**（ProjectFlow 掛 case、進度/延遲計算落地、AccessScope.projectWhere 收斂）。forms / workflow / kanban / iso-trail 已覆蓋。
+3. projects 補齊且全部綠燈後，評估是否再補 AccessScope 邊界案例；齊備才標 done。
+
+## 驗收要點對應現況（issue #36）
+- 「整合測試可在 CI 啟動 DB 並通過」：CI job 已建（第 1 批），**job 級綠燈待人工確認**。
+- 「覆蓋主要 Service 路徑與權限收斂」：forms / workflow / kanban / iso-trail 已覆蓋（含 AccessScope 收斂）；**僅剩 projects 未覆蓋**。
