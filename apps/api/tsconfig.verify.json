@@ -1,0 +1,13 @@
+{
+  "extends": "./tsconfig.build.json",
+  "compilerOptions": {
+    "baseUrl": "./",
+    "paths": { "@prisma/client": ["_verify/stubs/@prisma/client/index.d.ts"] },
+    "types": [],
+    "noEmit": true,
+    "incremental": false,
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*", "_verify/ambient.d.ts"],
+  "exclude": ["node_modules", "dist", "**/*.spec.ts"]
+}
