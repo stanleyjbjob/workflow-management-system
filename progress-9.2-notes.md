@@ -52,3 +52,34 @@
   3. 若手動觸發後仍紅，把該 run 的 job log 貼回 issue，下一輪據以修正。
 - 若本輪這個 push **有**觸發新的 workflow run，下一輪可直接由 Actions API 讀回 conclusion 判定 done。
 - 狀態：🔄 未完成（保留 in-progress）。
+
+## 本輪（2026-06-09，自動排程第 3 輪）
+
+延續第 1、2 輪，於沙箱 clone 真實 monorepo（pnpm 9.12.0 / Node 22）對**最新 HEAD（05e6df4）**再次完整驗證；本輪重點放在「排除真實程式 bug」與「釐清剩餘卡點」。
+
+### ✅ 本地（真實 pnpm / vite / vitest / jest）再次驗證全綠（無回歸）
+- `pnpm install --frozen-lockfile=false --ignore-scripts`（622 套件，~23 秒）成功。
+- **前端 `pnpm --filter @wfms/web build`**：`tsc -b && vite build` 全綠（65 modules）。
+- **前端 `pnpm --filter @wfms/web test`（vitest run）**：**9 檔 101 案全綠**，未再現 bus error。
+- **後端 `pnpm --filter @wfms/api exec jest`**：**12 個純引擎 suites 共 268 案全綠**；其餘 19 個 suites 為「failed to run」之**編譯期**錯誤，根因全部是 `@prisma/client` 未生成（`Module '@prisma/client' has no exported member 'FlowType'` / `'RoleCode'`、衍生 `'e' is of type 'unknown'`）。與第 1、2 輪完全一致，**非回歸、非真實 bug**。
+
+### ✅ 進一步佐證「generated client 就緒後即可編譯通過」
+- 檢視 `apps/api/prisma/schema.prisma`：**已定義** `enum FlowType { SALES ONBOARDING ENVIRONMENT CUSTOMIZATION }` 與 `enum RoleCode { MANAGER SALES CONSULTANT ENG_LEAD ENGINEER ASSISTANT }`。→ `prisma generate` 成功後 `@prisma/client` 必會輸出這兩個 enum 與完整 `Prisma` namespace，19 個 suites 的編譯錯誤即消失。
+- 確認 CI 設定無 script/設定層級 bug：`apps/api/package.json` 的 `build`(`prisma generate && nest build`)、`test`(`jest`)、`db:seed`、`test:integration`、`postinstall`(`prisma generate`) 皆存在；jest 單元設定（`jest.config.js`，`rootDir=src`、`*.spec.ts`）與整合設定（`jest.integration.config.js`，`test/integration/*.int-spec.ts`）**正確分流**——`build-test`（無 DB）跑的 `pnpm -r test` 只會撈到 31 個單元 spec，不會誤觸需 DB 的 5 個 int-spec。
+
+### ⛔ 沙箱限制（再次確認，與前兩輪相同）
+- 連線測試：`registry.npmjs.org` → 200、`github.com` → 200、**`binaries.prisma.sh` → 000（封鎖）**。
+- `prisma generate --no-engine`（含 `PRISMA_ENGINES_CHECKSUM_IGNORE_MISSING=1`）與 `prisma validate` 皆因 `binaries.prisma.sh` **403/封鎖**而失敗；npm 套件內僅含 wasm 引擎（`query_engine_bg.postgresql.wasm`），native 5.22 client 生成仍須下載被擋的 query/schema-engine。→ **沙箱無法生成 Prisma client 是硬限制，API build / 含 client 之 jest / 整合測試只能在 GitHub Actions 跑。**
+
+### 為何本輪未開 PR / 未自動觸發判定
+- GitHub 連接器**未提供讀取 workflow run（Actions runs）的工具**；唯一與 CI 狀態相關的是 `get_pull_request_status`（需先有 PR）。
+- 但本排程規則明定「**不自動開 PR**，除非 issue 明確要求」，#37 未要求開 PR，故本輪不開 PR。→ 代表**自動排程在現有工具與規則下，無法自行觀測 main 的 CI 結論**，此驗收步驟必須由人類完成。
+
+### 結論與下一步（handoff，給人類）
+- 程式面：連續 3 輪本地驗證**全綠且無回歸**，未發現需修正的編譯/型別/測試錯誤；schema 已含必要 enum，CI 設定無 script/分流 bug。**程式面已就緒。**
+- **驗收仍卡在「需人工於 GitHub 端確認 CI 結果」**，請擇一處理：
+  1. **Settings → Actions → General** 確認為「Allow all actions and reusable workflows」，且 `CI` workflow 未被停用（若顯示 disabled，按 Enable）。
+  2. 到 **Actions 分頁 → 選 `CI` → Run workflow（workflow_dispatch，第 2 輪已加）** 手動觸發於 `main`，確認 **build-test / migration-check / integration-test** 三個 job 全綠。
+  3. 若仍有紅燈，把該 job log（特別是 `prisma generate`、`pnpm -r build`、`prisma migrate deploy`、`test:integration` 段）貼回本 issue，下一輪即可據實 log 修正真實問題。
+  4. 若三個 job 全綠，可直接由人類複查後將 #37 標 `done` 並關閉（或留給下一輪在能讀到綠燈時收尾）。
+- 狀態：🔄 未完成（保留 in-progress）。
