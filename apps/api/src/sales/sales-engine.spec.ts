@@ -120,7 +120,7 @@ describe('normalizeOpportunity', () => {
         clientName: '  客戶A ',
         leadSources: [LeadSource.MARKETING, LeadSource.SELF_DEVELOPED],
         products: [' 人事系統 ', '人事系統', '  '],
-      } as OpportunityInput),
+      }),
     );
     expect(n.title).toBe('案A');
     expect(n.clientName).toBe('客戶A');
