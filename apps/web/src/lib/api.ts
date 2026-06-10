@@ -6,9 +6,12 @@
  * - 後端錯誤慣例為 guard()→HTTP 例外、body 形如 `{ code, message }`（見 projects/kanban controller）；
  *   統一轉為 `ApiError` 保留 `status` 與 `code` 供前端判讀（401 未登入 / 403 權限不足…）。
  * - `buildQuery` / `toErrorBody` 為純函式（無 fetch/DOM 相依），可被 vitest 直接測試。
+ * - 401 統一處理（issue 8.4 #39）：呼叫 `handleUnauthorized()`（預設導向 `GET /auth/login`），全站一致。
  */
+import { handleUnauthorized } from './auth';
+import { API_BASE } from './env';
 
-export const API_BASE: string = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:3000';
+export { API_BASE };
 
 /** REST 錯誤（保留 HTTP status 與後端錯誤碼）。`status === 0` 表示連線失敗。 */
 export class ApiError extends Error {
@@ -84,6 +87,7 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
       raw = null;
     }
     const body = toErrorBody(res.status, raw);
+    if (res.status === 401) handleUnauthorized();
     throw new ApiError(res.status, body.code, body.message);
   }
   if (res.status === 204) return undefined as T;
