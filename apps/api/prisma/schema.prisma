@@ -155,6 +155,8 @@ model WorkflowDefinition {
   version     Int      @default(1)
   isActive    Boolean  @default(true)
   createdById String?
+  /// 設計器完整草稿（trigger/calendar/步驟 forms 等設計層資訊；issue 8.6 #41）
+  designer    Json?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
