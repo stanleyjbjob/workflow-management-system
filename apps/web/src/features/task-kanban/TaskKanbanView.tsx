@@ -1,19 +1,31 @@
 /**
- * 任務看板畫面（issue 6.1 / §8，對應原型「流程看板/待辦」）。
- *  - 上方 KPI：待處理 / 即將到期 / 逾期 / 遞延（prototype .grid-kpi 樣式）。
- *  - 過濾：角色（責任角色）、流程型別。
+ * 任務看板畫面（issue 6.1 / §8；8.9 #44 改為伺服端過濾）。
+ *  - 上方 KPI：待處理 / 即將到期 / 逾期 / 遞延（prototype .grid-kpi 樣式）；由後端計算、前端直接呈現。
+ *  - 過濾：角色（責任角色）、流程型別、僅看與我相關、「即將到期」視窗（工作日）。
+ *    過濾器為**受控元件**：變更經 onFilterChange 通知上層，由上層帶 query 參數重新呼叫 GET /kanban
+ *    （issue 8.9 #44；不再於客端過濾，KPI / 分欄 / 計數一律以後端結果為準）。
  *  - 四欄看板：待辦 / 進行中 / 即將到期（含逾期）/ 已完成；逾期、即將到期、受連假遞延、待填表單以標記呈現。
- *  - 點任務卡 → 開啟案件詳情側欄（提供 onOpenCase 時可導向案件詳情頁）。
- * 後端已完成分類與標示；本元件僅呈現與檢視層互動。資料未提供時使用 seed 範例。
+ *  - 點任務卡 → 開啟案件詳情側欄；提供 onOpenCase 時側欄「前往案件詳情」帶 caseId 導向（與 8.12 銜接）。
  * 視覺對齊 prototype/index.html（view-board）。
  */
-import { useMemo, useState } from 'react';
-import { ROLE_OPTIONS, filterBoard, flowTypesIn } from './board-view';
-import { sampleKanbanBoard } from './seed';
+import { useState } from 'react';
+import { EmptyState } from '../../components/AsyncStates';
+import {
+  ROLE_OPTIONS,
+  UPCOMING_WINDOW_OPTIONS,
+  mergeFlowOptions,
+  type KanbanFilterState,
+} from './board-view';
 import { KANBAN_COLUMN_LABELS, type KanbanBoard, type KanbanCard, type KanbanColumn } from './types';
 
 export interface TaskKanbanViewProps {
-  board?: KanbanBoard;
+  board: KanbanBoard;
+  /** 過濾器狀態（受控）。 */
+  filter: KanbanFilterState;
+  /** 過濾器變更（上層應重新向後端查詢）。 */
+  onFilterChange: (next: KanbanFilterState) => void;
+  /** 重新查詢中（保留現有看板、淡化呈現）。 */
+  refreshing?: boolean;
   /** 點卡片「前往案件」時呼叫（提供 caseId）；未提供則僅顯示側欄詳情。 */
   onOpenCase?: (caseId: string) => void;
 }
@@ -45,24 +57,20 @@ function kpiCard(label: string, value: number, cssColor: string, pct: number): J
   );
 }
 
-export function TaskKanbanView({ board = sampleKanbanBoard, onOpenCase }: TaskKanbanViewProps): JSX.Element {
-  const [role, setRole] = useState<string>('');
-  const [flow, setFlow] = useState<string>('');
+export function TaskKanbanView({ board, filter, onFilterChange, refreshing, onOpenCase }: TaskKanbanViewProps): JSX.Element {
   const [selected, setSelected] = useState<KanbanCard | null>(null);
-
-  const view = useMemo(
-    () => filterBoard(board, { role: role || null, flowType: flow || null }),
-    [board, role, flow],
-  );
-  const flowTypes = useMemo(() => flowTypesIn(board), [board]);
+  const flowOptions = mergeFlowOptions(board);
+  const upcomingWindow = filter.upcomingWithinDays ?? 3;
+  const isEmpty = board.total === 0;
+  const hasFilter = filter.role !== '' || filter.flowType !== '' || filter.onlyMine;
 
   return (
-    <section>
+    <section style={refreshing ? { opacity: 0.6, transition: 'opacity .15s' } : undefined} aria-busy={refreshing}>
       <div className="grid-kpi">
-        {kpiCard('待處理任務', view.kpi.pending, 'var(--brand)', 70)}
-        {kpiCard('即將到期（3 工作日內）', view.kpi.upcoming, 'var(--amber)', 40)}
-        {kpiCard('已逾期', view.kpi.overdue, 'var(--red)', view.kpi.overdue ? 60 : 6)}
-        {kpiCard('受連假遞延', view.kpi.deferred, 'var(--purple)', 30)}
+        {kpiCard('待處理任務', board.kpi.pending, 'var(--brand)', 70)}
+        {kpiCard(`即將到期（${upcomingWindow} 工作日內）`, board.kpi.upcoming, 'var(--amber)', 40)}
+        {kpiCard('已逾期', board.kpi.overdue, 'var(--red)', board.kpi.overdue ? 60 : 6)}
+        {kpiCard('受連假遞延', board.kpi.deferred, 'var(--purple)', 30)}
       </div>
 
       <div className="sec-title">
@@ -75,7 +83,12 @@ export function TaskKanbanView({ board = sampleKanbanBoard, onOpenCase }: TaskKa
       <div className="row" style={{ marginBottom: 14, alignItems: 'center' }}>
         <label className="muted" style={{ fontSize: '12.5px' }}>
           角色：
-          <select className="btn sm" value={role} onChange={(e) => setRole(e.target.value)} style={{ marginLeft: 4 }}>
+          <select
+            className="btn sm"
+            value={filter.role}
+            onChange={(e) => onFilterChange({ ...filter, role: e.target.value })}
+            style={{ marginLeft: 4 }}
+          >
             <option value="">全部</option>
             {ROLE_OPTIONS.map((r) => (
               <option key={r.code} value={r.code}>
@@ -86,25 +99,70 @@ export function TaskKanbanView({ board = sampleKanbanBoard, onOpenCase }: TaskKa
         </label>
         <label className="muted" style={{ fontSize: '12.5px' }}>
           流程：
-          <select className="btn sm" value={flow} onChange={(e) => setFlow(e.target.value)} style={{ marginLeft: 4 }}>
+          <select
+            className="btn sm"
+            value={filter.flowType}
+            onChange={(e) => onFilterChange({ ...filter, flowType: e.target.value })}
+            style={{ marginLeft: 4 }}
+          >
             <option value="">全部</option>
-            {flowTypes.map((f) => (
-              <option key={f} value={f}>
-                {FLOW_LABELS[f] ?? f}
+            {flowOptions.map((f) => (
+              <option key={f.code} value={f.code}>
+                {f.label}
               </option>
             ))}
           </select>
         </label>
+        <label className="muted" style={{ fontSize: '12.5px' }}>
+          到期視窗：
+          <select
+            className="btn sm"
+            value={String(upcomingWindow)}
+            onChange={(e) => {
+              const n = Number(e.target.value);
+              onFilterChange({ ...filter, upcomingWithinDays: n === 3 ? null : n });
+            }}
+            style={{ marginLeft: 4 }}
+          >
+            {UPCOMING_WINDOW_OPTIONS.map((n) => (
+              <option key={n} value={String(n)}>
+                {n} 工作日{n === 3 ? '（預設）' : ''}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="muted" style={{ fontSize: '12.5px', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={filter.onlyMine}
+            onChange={(e) => onFilterChange({ ...filter, onlyMine: e.target.checked })}
+            style={{ verticalAlign: 'middle', marginRight: 4 }}
+          />
+          僅看與我相關
+        </label>
         <span className="muted" style={{ fontSize: 12 }}>
-          共 {view.total} 張任務卡
+          共 {board.total} 張任務卡
         </span>
       </div>
 
-      <div className="kanban">
-        {board.order.map((col) => (
-          <KanbanColumnView key={col} column={col} cards={view.columns[col]} onSelect={(c) => setSelected(c)} />
-        ))}
-      </div>
+      {isEmpty ? (
+        <EmptyState message={hasFilter ? '目前過濾條件下沒有任務卡。' : '目前沒有任務卡。'}>
+          {hasFilter && (
+            <button
+              className="btn sm"
+              onClick={() => onFilterChange({ ...filter, role: '', flowType: '', onlyMine: false })}
+            >
+              清除過濾條件
+            </button>
+          )}
+        </EmptyState>
+      ) : (
+        <div className="kanban">
+          {board.order.map((col) => (
+            <KanbanColumnView key={col} column={col} cards={board.columns[col]} onSelect={(c) => setSelected(c)} />
+          ))}
+        </div>
+      )}
 
       <div className="legend">
         <span>🟦 進行中　🟩 已完成　🟧 即將到期　🟥 已逾期</span>
@@ -221,9 +279,11 @@ function CardDetailDrawer({
           <button className="btn" onClick={onClose}>
             關閉
           </button>{' '}
-          <button className="btn primary" onClick={() => onOpenCase?.(card.caseId)}>
-            前往案件詳情
-          </button>
+          {onOpenCase && (
+            <button className="btn primary" onClick={() => onOpenCase(card.caseId)}>
+              前往案件詳情
+            </button>
+          )}
         </div>
       </div>
     </div>
