@@ -5,7 +5,7 @@
  * （以結構複製、與後端型別解耦，與 project-gantt 同風格）。後端已完成分欄 / 標示 / KPI 計算，
  * 前端僅負責呈現與檢視層互動（角色過濾、點卡開案件）。
  *
- * 待 REST 層就緒後改以 fetch 取得相同結構即可；本輪先以 seed 範例資料驅動 UI。
+ * 已由 REST `GET /kanban` 取得（issue 8.2 #34 / 8.9 #44）；seed 僅供測試與展示。
  */
 
 export type KanbanColumn = 'TODO' | 'IN_PROGRESS' | 'UPCOMING' | 'DONE';
@@ -30,9 +30,11 @@ export interface KanbanCard {
   caseTitle: string | null;
   clientName: string | null;
   flowType: string | null;
+  stepDefinitionId: string | null;
   stepName: string | null;
   stepOrder: number | null;
   status: string;
+  responsibleRoleId: string | null;
   responsibleRoleCode: string | null;
   assigneeId: string | null;
   dueDate: string | null;

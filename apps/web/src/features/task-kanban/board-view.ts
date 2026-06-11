@@ -112,3 +112,58 @@ export function flowTypesIn(board: KanbanBoard): string[] {
   }
   return [...set].sort();
 }
+
+/* ───────────── 伺服端過濾（issue 8.9 #44）：UI 過濾器 ↔ GET /kanban query 參數 ───────────── */
+
+/** 流程型別固定選項（與後端 FlowType 對齊；下拉永遠完整，不因當前結果縮水）。 */
+export const FLOW_OPTIONS: readonly { code: string; label: string }[] = [
+  { code: 'SALES', label: '銷售' },
+  { code: 'ONBOARDING', label: '導入' },
+  { code: 'ENVIRONMENT', label: '環境建置' },
+  { code: 'CUSTOMIZATION', label: '客製化' },
+];
+
+/** 「即將到期」視窗可選值（工作日；後端預設 3）。 */
+export const UPCOMING_WINDOW_OPTIONS: readonly number[] = [3, 5, 7, 10];
+
+/** 看板 UI 過濾器狀態（受控；變更即重新向後端查詢）。 */
+export interface KanbanFilterState {
+  /** 責任角色（RoleCode）；空字串＝全部。 */
+  role: string;
+  /** 流程型別；空字串＝全部。 */
+  flowType: string;
+  /** 僅看與我相關（指派給我或我角色負責）。 */
+  onlyMine: boolean;
+  /** 「即將到期」視窗（工作日）；null＝後端預設（3）。 */
+  upcomingWithinDays: number | null;
+}
+
+/** 預設過濾器（不過濾、視窗用後端預設）。 */
+export const DEFAULT_KANBAN_FILTER: KanbanFilterState = {
+  role: '',
+  flowType: '',
+  onlyMine: false,
+  upcomingWithinDays: null,
+};
+
+/** UI 過濾器 → GET /kanban 查詢參數（純函式；空值不送、視窗等於預設 3 時亦不送）。 */
+export function toKanbanQuery(f: KanbanFilterState): {
+  role?: string | null;
+  flowType?: string | null;
+  onlyMine?: boolean;
+  upcomingWithinDays?: number | null;
+} {
+  return {
+    role: f.role || null,
+    flowType: f.flowType || null,
+    onlyMine: f.onlyMine,
+    upcomingWithinDays: f.upcomingWithinDays != null && f.upcomingWithinDays !== 3 ? f.upcomingWithinDays : null,
+  };
+}
+
+/** 流程下拉選項：固定選項 ∪ 當前看板出現之未知型別（防後端新增型別時前端漏列）。 */
+export function mergeFlowOptions(board: KanbanBoard): { code: string; label: string }[] {
+  const known = new Set(FLOW_OPTIONS.map((o) => o.code));
+  const extras = flowTypesIn(board).filter((t) => !known.has(t));
+  return [...FLOW_OPTIONS, ...extras.map((code) => ({ code, label: code }))];
+}

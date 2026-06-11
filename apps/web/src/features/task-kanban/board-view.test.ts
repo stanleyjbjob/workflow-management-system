@@ -4,6 +4,9 @@ import {
   filterBoard,
   flowTypesIn,
   summarizeKpi,
+  mergeFlowOptions,
+  toKanbanQuery,
+  DEFAULT_KANBAN_FILTER,
   ROLE_OPTIONS,
 } from './board-view';
 import { sampleKanbanBoard } from './seed';
@@ -71,5 +74,48 @@ describe('flowTypesIn / ROLE_OPTIONS', () => {
   });
   it('role options include the six role codes', () => {
     expect(ROLE_OPTIONS.map((r) => r.code)).toEqual(['MANAGER', 'SALES', 'CONSULTANT', 'ENG_LEAD', 'ENGINEER', 'ASSISTANT']);
+  });
+});
+
+describe('toKanbanQuery / DEFAULT_KANBAN_FILTER（issue 8.9 #44 伺服端過濾）', () => {
+  it('預設過濾器→不送任何參數（kanbanQuery 應組出空字串）', () => {
+    const q = toKanbanQuery(DEFAULT_KANBAN_FILTER);
+    expect(q.role).toBeNull();
+    expect(q.flowType).toBeNull();
+    expect(q.onlyMine).toBe(false);
+    expect(q.upcomingWithinDays).toBeNull();
+  });
+
+  it('role / flowType 空字串視為未過濾、有值原樣帶出', () => {
+    expect(toKanbanQuery({ ...DEFAULT_KANBAN_FILTER, role: 'ENGINEER' }).role).toBe('ENGINEER');
+    expect(toKanbanQuery({ ...DEFAULT_KANBAN_FILTER, flowType: 'SALES' }).flowType).toBe('SALES');
+  });
+
+  it('onlyMine 透傳布林', () => {
+    expect(toKanbanQuery({ ...DEFAULT_KANBAN_FILTER, onlyMine: true }).onlyMine).toBe(true);
+  });
+
+  it('upcomingWithinDays 等於後端預設 3 時不送；其他值帶出', () => {
+    expect(toKanbanQuery({ ...DEFAULT_KANBAN_FILTER, upcomingWithinDays: 3 }).upcomingWithinDays).toBeNull();
+    expect(toKanbanQuery({ ...DEFAULT_KANBAN_FILTER, upcomingWithinDays: 7 }).upcomingWithinDays).toBe(7);
+  });
+});
+
+describe('mergeFlowOptions', () => {
+  it('永遠包含四種固定流程型別（不因當前看板縮水）', () => {
+    const codes = mergeFlowOptions(sampleKanbanBoard).map((o) => o.code);
+    for (const c of ['SALES', 'ONBOARDING', 'ENVIRONMENT', 'CUSTOMIZATION']) {
+      expect(codes).toContain(c);
+    }
+  });
+
+  it('看板出現未知型別時附加於後', () => {
+    const extra: KanbanCard = { ...findCard('si-4'), stepInstanceId: 'si-x', flowType: 'FUTURE_FLOW' };
+    const board = {
+      ...sampleKanbanBoard,
+      columns: { ...sampleKanbanBoard.columns, TODO: [...sampleKanbanBoard.columns.TODO, extra] },
+    };
+    const opts = mergeFlowOptions(board);
+    expect(opts[opts.length - 1]).toEqual({ code: 'FUTURE_FLOW', label: 'FUTURE_FLOW' });
   });
 });
