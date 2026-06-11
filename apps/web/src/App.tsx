@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { WorkflowDesigner } from './features/workflow-designer';
-import { ProjectWorkspace } from './features/project-gantt';
+import { ProjectWorkspacePage } from './features/project-gantt';
 import { TaskKanbanPage } from './features/task-kanban';
 import { IsoTrailPage } from './features/iso-trail';
 import { AccountBadge, primaryRole, useSession } from './features/auth';
@@ -87,7 +87,7 @@ export function App(): JSX.Element {
 
       {tab === 'designer' && <WorkflowDesigner />}
       {tab === 'kanban' && <TaskKanbanPage />}
-      {tab === 'project' && <ProjectWorkspace />}
+      {tab === 'project' && <ProjectWorkspacePage currentUserId={currentUser?.sub ?? null} />}
       {tab === 'iso' && <IsoTrailPage />}
       {tab === 'status' && (
         <section>
