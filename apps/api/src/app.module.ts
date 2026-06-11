@@ -3,6 +3,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { AttachmentsModule } from './attachments/attachments.module';
 import { AuthModule } from './auth/auth.module';
 import { CalendarModule } from './calendar/calendar.module';
+import { CasesModule } from './cases/cases.module';
 import { CustomizationModule } from './customization/customization.module';
 import { EnvironmentModule } from './environment/environment.module';
 import { FormsModule } from './forms/forms.module';
@@ -25,6 +26,7 @@ import { WorkflowModule } from './workflow/workflow.module';
     AuthModule,
     RbacModule,
     WorkflowModule,
+    CasesModule,
     FormsModule,
     TemplatesModule,
     AttachmentsModule,
