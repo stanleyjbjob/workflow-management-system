@@ -1,8 +1,9 @@
-// 流程定義設計器 — 持久化層
+// 流程定義設計器 — localStorage 持久化（自 8.11 #46 起降級為備援）
 //
-// 後端 WorkflowDefinition CRUD API 尚未建立（見 progress.md），本輪以瀏覽器
-// localStorage 作為持久化，並以單一 Repository 介面封裝，待後端就緒時可替換為
-// REST 實作而不動 UI。儲存即代表「可套用於新案件」之流程定義來源。
+// 主要持久化已改接後端 `/workflows` REST（見 api.ts，issue 8.11 #46）；
+// 本檔保留 localStorage 實作作為同步介面之參考實作與既有測試之依據，
+// 未接入生產 UI。離線草稿暫存（issue 列為可選）若日後需要，可在 api.ts
+// 失敗路徑掛回本 repository。
 import { reindex, summarize, touch } from './designer';
 import type { WorkflowSummary } from './designer';
 import type { WorkflowDraft } from './types';
