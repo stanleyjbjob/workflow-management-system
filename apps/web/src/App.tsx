@@ -5,6 +5,7 @@ import { TaskKanbanPage } from './features/task-kanban';
 import { CaseDetailPage } from './features/case-detail';
 import { IsoTrailPage } from './features/iso-trail';
 import { AccountBadge, primaryRole, useSession } from './features/auth';
+import { NotificationBell } from './features/notification-inbox';
 import { API_BASE } from './lib/api';
 
 type Tab = 'status' | 'designer' | 'kanban' | 'case' | 'project' | 'iso';
@@ -74,14 +75,17 @@ export function App(): JSX.Element {
         }}
       >
         <h1 style={{ margin: 0 }}>工作流程管理系統</h1>
-        <AccountBadge
-          state={session.state}
-          onLogin={session.login}
-          onLogout={() => void session.logout()}
-          onReload={session.reload}
-          viewRole={viewRole}
-          onViewRoleChange={setViewRole}
-        />
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem' }}>
+          {isAuthenticated && <NotificationBell onOpenCase={openCase} />}
+          <AccountBadge
+            state={session.state}
+            onLogin={session.login}
+            onLogout={() => void session.logout()}
+            onReload={session.reload}
+            viewRole={viewRole}
+            onViewRoleChange={setViewRole}
+          />
+        </div>
       </header>
 
       <nav style={{ borderBottom: '1px solid #e2e8f0', marginBottom: '1rem' }}>
