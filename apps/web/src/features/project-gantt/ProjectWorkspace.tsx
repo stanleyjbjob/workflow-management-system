@@ -17,6 +17,8 @@ import type { ProjectGanttData } from './types';
 export interface ProjectWorkspaceProps {
   data?: ProjectGanttData;
   cases?: Record<string, CaseSummary>;
+  /** 提供時，甘特列點擊改導向統一案件詳情頁（8.12 #47）；未提供則退回內嵌 seed 側欄。 */
+  onOpenCase?: (caseId: string) => void;
 }
 
 type View = { kind: 'gantt' } | { kind: 'case'; caseId: string };
@@ -24,11 +26,18 @@ type View = { kind: 'gantt' } | { kind: 'case'; caseId: string };
 export function ProjectWorkspace({
   data = sampleProjectGantt,
   cases = sampleCases,
+  onOpenCase,
 }: ProjectWorkspaceProps): JSX.Element {
   const [view, setView] = useState<View>({ kind: 'gantt' });
 
-  // 甘特圖流程列 → 案件詳情（僅當案件存在；§5.3）
+  // 甘特圖流程列 → 案件詳情：
+  // 提供 onOpenCase（REST 模式）→ 統一導向案件詳情頁（8.12 #47，caseId 為真實 DB id）；
+  // 否則退回內嵌 seed 側欄（僅當案件存在於 seed map；§5.3）。
   const handleSelectCase = (caseId: string): void => {
+    if (onOpenCase) {
+      onOpenCase(caseId);
+      return;
+    }
     if (Object.prototype.hasOwnProperty.call(cases, caseId)) {
       setView({ kind: 'case', caseId });
     }

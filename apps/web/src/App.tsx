@@ -2,15 +2,22 @@ import { useEffect, useMemo, useState } from 'react';
 import { WorkflowDesigner } from './features/workflow-designer';
 import { ProjectWorkspacePage } from './features/project-gantt';
 import { TaskKanbanPage } from './features/task-kanban';
+import { CaseDetailPage } from './features/case-detail';
 import { IsoTrailPage } from './features/iso-trail';
 import { AccountBadge, primaryRole, useSession } from './features/auth';
 import { API_BASE } from './lib/api';
 
-type Tab = 'status' | 'designer' | 'kanban' | 'project' | 'iso';
+type Tab = 'status' | 'designer' | 'kanban' | 'case' | 'project' | 'iso';
 
 export function App(): JSX.Element {
   const [tab, setTab] = useState<Tab>('designer');
   const [apiStatus, setApiStatus] = useState<string>('檢查中…');
+  // 案件詳情頁選取的案件（看板 / 專案管理 openCase 統一導入；8.12 #47）。
+  const [caseId, setCaseId] = useState<string | null>(null);
+  const openCase = (id: string): void => {
+    setCaseId(id);
+    setTab('case');
+  };
   const session = useSession();
 
   // 檢視角色（過濾用，非授權）：登入後預設為使用者主要角色。
@@ -80,14 +87,16 @@ export function App(): JSX.Element {
       <nav style={{ borderBottom: '1px solid #e2e8f0', marginBottom: '1rem' }}>
         {tabBtn('designer', '流程定義設計器')}
         {tabBtn('kanban', '任務看板')}
+        {tabBtn('case', '案件詳情')}
         {tabBtn('project', '專案進度')}
         {tabBtn('iso', '稽核軌跡')}
         {tabBtn('status', '系統狀態')}
       </nav>
 
       {tab === 'designer' && <WorkflowDesigner />}
-      {tab === 'kanban' && <TaskKanbanPage />}
-      {tab === 'project' && <ProjectWorkspacePage currentUserId={currentUser?.sub ?? null} />}
+      {tab === 'kanban' && <TaskKanbanPage onOpenCase={openCase} />}
+      {tab === 'case' && <CaseDetailPage caseId={caseId} />}
+      {tab === 'project' && <ProjectWorkspacePage currentUserId={currentUser?.sub ?? null} onOpenCase={openCase} />}
       {tab === 'iso' && <IsoTrailPage />}
       {tab === 'status' && (
         <section>
