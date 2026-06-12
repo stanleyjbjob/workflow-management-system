@@ -272,7 +272,7 @@ export class ReminderService {
   async listInAppNotifications(
     recipientId: string,
     opts: { unreadOnly?: boolean; take?: number } = {},
-  ): Promise<Array<{ id: string; title: string; body: string; kind: string; read: boolean; createdAt: Date }>> {
+  ): Promise<Array<{ id: string; title: string; body: string; kind: string; read: boolean; createdAt: Date; caseId: string | null }>> {
     const form = await this.prisma.formDefinition.findFirst({
       where: { code: ReminderService.INBOX_FORM_CODE },
       orderBy: { version: 'desc' },
@@ -283,9 +283,9 @@ export class ReminderService {
       where: { formDefinitionId: form.id, submittedById: recipientId },
       orderBy: { createdAt: 'desc' },
       take: opts.take ?? 100,
-      select: { id: true, data: true, createdAt: true },
+      select: { id: true, data: true, createdAt: true, caseId: true },
     });
-    const out: Array<{ id: string; title: string; body: string; kind: string; read: boolean; createdAt: Date }> = [];
+    const out: Array<{ id: string; title: string; body: string; kind: string; read: boolean; createdAt: Date; caseId: string | null }> = [];
     for (const s of subs) {
       const d = (s.data ?? {}) as { title?: unknown; body?: unknown; kind?: unknown; read?: unknown };
       const read = d.read === true;
@@ -297,6 +297,7 @@ export class ReminderService {
         kind: typeof d.kind === 'string' ? d.kind : '',
         read,
         createdAt: s.createdAt,
+        caseId: s.caseId ?? null,
       });
     }
     return out;
