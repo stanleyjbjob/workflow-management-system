@@ -7,8 +7,8 @@
  * - 「重新整理（fresh）」以 fresh=true 先依案件步驟比例回寫各流程進度再重算（§6.2）。
  * - 重載期間保留現有畫面（淡化），以遞增序號防過時回應覆蓋（沿用 8.9 TaskKanbanPage 慣例）。
  * - 建立專案表單於清單上方；其餘維護（編輯/狀態/刪除/掛載/排除日）在 ProjectManagePanel。
- * - 甘特圖 / 簡報模式 / 案件雙向導覽沿用 ProjectWorkspace（案件側欄改接 `/cases/:id/detail`
- *   屬第二階段，現仍為 seed 範例對照）。
+ * - 甘特圖 / 簡報模式沿用 ProjectWorkspace；案件導覽（8.12 #47）：上層提供 onOpenCase 時，
+ *   甘特列點擊統一導向案件詳情頁（該頁接 `/cases/:id/detail`）。
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { EmptyState, ErrorState, LoadingState, toErrorState, type NormalizedError } from '../../components/AsyncStates';
@@ -54,9 +54,11 @@ type BundleState =
 export interface ProjectWorkspacePageProps {
   /** 建立專案表單之預設負責人（目前登入者 ID）。 */
   currentUserId?: string | null;
+  /** 甘特列點擊導向統一案件詳情頁（8.12 #47）。 */
+  onOpenCase?: (caseId: string) => void;
 }
 
-export function ProjectWorkspacePage({ currentUserId = null }: ProjectWorkspacePageProps): JSX.Element {
+export function ProjectWorkspacePage({ currentUserId = null, onOpenCase }: ProjectWorkspacePageProps): JSX.Element {
   const [list, setList] = useState<ListState>({ kind: 'loading' });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [bundle, setBundle] = useState<BundleState>({ kind: 'idle' });
@@ -246,7 +248,7 @@ export function ProjectWorkspacePage({ currentUserId = null }: ProjectWorkspaceP
       )}
       {bundle.kind === 'ready' && (
         <div style={{ opacity: bundle.refreshing ? 0.6 : 1, transition: 'opacity 0.15s' }}>
-          <ProjectWorkspace data={toProjectGanttData(bundle.bundle.project, bundle.bundle.gantt)} />
+          <ProjectWorkspace data={toProjectGanttData(bundle.bundle.project, bundle.bundle.gantt)} onOpenCase={onOpenCase} />
           <ProjectManagePanel
             project={bundle.bundle.project}
             delays={bundle.bundle.delays}
