@@ -4,11 +4,12 @@ import { ProjectWorkspacePage } from './features/project-gantt';
 import { TaskKanbanPage } from './features/task-kanban';
 import { CaseDetailPage } from './features/case-detail';
 import { IsoTrailPage } from './features/iso-trail';
-import { AccountBadge, primaryRole, useSession } from './features/auth';
+import { AccountBadge, isManager, primaryRole, useSession } from './features/auth';
 import { NotificationBell } from './features/notification-inbox';
+import { HolidayAdminPage } from './features/holiday-admin';
 import { API_BASE } from './lib/api';
 
-type Tab = 'status' | 'designer' | 'kanban' | 'case' | 'project' | 'iso';
+type Tab = 'status' | 'designer' | 'kanban' | 'case' | 'project' | 'iso' | 'holiday';
 
 export function App(): JSX.Element {
   const [tab, setTab] = useState<Tab>('designer');
@@ -94,6 +95,7 @@ export function App(): JSX.Element {
         {tabBtn('case', '案件詳情')}
         {tabBtn('project', '專案進度')}
         {tabBtn('iso', '稽核軌跡')}
+        {currentUser && isManager(currentUser) && tabBtn('holiday', '假日維護')}
         {tabBtn('status', '系統狀態')}
       </nav>
 
@@ -102,6 +104,8 @@ export function App(): JSX.Element {
       {tab === 'case' && <CaseDetailPage caseId={caseId} />}
       {tab === 'project' && <ProjectWorkspacePage currentUserId={currentUser?.sub ?? null} onOpenCase={openCase} />}
       {tab === 'iso' && <IsoTrailPage />}
+      {/* 假日維護（8.14 #49）：入口僅 MANAGER 可見；後端 admin:manage 為最終權威。 */}
+      {tab === 'holiday' && currentUser && isManager(currentUser) && <HolidayAdminPage />}
       {tab === 'status' && (
         <section>
           <p>
